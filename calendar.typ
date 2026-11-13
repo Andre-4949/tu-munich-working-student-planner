@@ -11,7 +11,7 @@
 //   views        comma separated: overview,month,week (default: all three)
 //   empty-weeks  true to also print weeks without lectures or work slots (default: false)
 //   audience     me | boss. boss: only the monthly view with office times and exam days (default: me)
-#import "lib.typ": planner-calendar
+#import "template/build.typ": planner-calendar
 
 #let opt(key, default) = sys.inputs.at(key, default: default)
 

@@ -224,7 +224,11 @@ fictional files in `examples/`. Check with `git status --ignored` before you pub
 | `planner/travel.py`, `timing.py` | Walks between places (car rules) and their clock times |
 | `planner/days.py`, `weekly.py`, `planning.py` | Options of a day, the weekly choice, the plan |
 | `planner/export.py`, `supervisor.py`, `summary.py`, `pdf.py` | JSON, supervisor CSV, terminal summary, Typst PDF |
-| `calendar.typ`, `lib.typ` | Typst template for the personal and supervisor PDFs |
+| `calendar.typ` | Typst entry point: reads `data/plan.json`, options via `--input` |
+| `template/build.typ` | Builds the pages (overview, months, weeks) for both PDFs |
+| `template/overview.typ`, `month.typ`, `week.typ` | The three page types |
+| `template/chips.typ`, `colors.typ`, `format.typ`, `data.typ` | Blocks, colours, dates and durations, JSON helpers |
+| `template/language.typ`, `template/lang/*.typ` | Labels in English and German |
 
 ## Tests
 
