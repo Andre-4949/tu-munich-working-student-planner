@@ -5,6 +5,7 @@ import sys
 import tempfile
 import tomllib
 import unittest
+import unittest.mock
 from datetime import date
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from plan import (CAR, HOME, JOB, TRANSIT, TUM, ConfigError, GapSpec, config_fro
 
 MONDAY = date(2026, 12, 7)
 FRIDAY = date(2026, 12, 11)
+SUNDAY = date(2026, 12, 13)
 CAR_HOME = "home"
 CAR_OUT = "out"
 
@@ -204,6 +206,14 @@ class ScheduleGapTests(unittest.TestCase):
 
 
 class DayCandidateTests(unittest.TestCase):
+    def test_short_gap_with_buffer_still_has_a_commute_baseline(self):
+        # 14:00-14:15 between two lectures, with a 10 min buffer: no visit fits,
+        # but the day still needs its commute, so the baseline must exist
+        cfg = make_config(schedule={"buffer_minutes": 10})
+        cand = day_candidates(MONDAY, [(at(10), at(14)), (at(14, 15), at(15, 45))], cfg)
+        self.assertIsNotNone(cand.baseline)
+        self.assertEqual(cand.baseline.travel, 80)  # transit 40 + 40
+
     def test_free_day_prefers_the_car_from_home(self):
         cfg = make_config(car=CAR_TABLE)
         cand = day_candidates(MONDAY, [], cfg)
@@ -237,6 +247,63 @@ class DayCandidateTests(unittest.TestCase):
         cfg = make_config()
         self.assertEqual(day_candidates(date(2026, 12, 12), [], cfg).visits, [])
 
+    def test_timed_block_means_no_work_before_it_ends(self):
+        # an exam 10:00-10:30 on Monday: no visit may arrive before 10:30 that day, Friday is unaffected
+        cfg = make_config(holidays={"no_work_durations": ["2026-12-07 10:00..10:30"]})
+        monday = day_candidates(MONDAY, [], cfg)
+        self.assertTrue(monday.visits)
+        self.assertGreaterEqual(min(arrive for o in monday.visits for arrive, _ in o.visits), at(10, 30))
+        friday = day_candidates(FRIDAY, [], cfg)
+        self.assertLess(min(arrive for o in friday.visits for arrive, _ in o.visits), at(10, 30))
+
+    def test_timed_block_before_a_lecture_keeps_the_morning_commute(self):
+        # the exam is followed by a lecture at 12:00: a visit between 10:30 and the lecture still fits
+        cfg = make_config(holidays={"no_work_durations": ["2026-12-07 10:00..10:30"]})
+        cand = day_candidates(MONDAY, [(at(12), at(13))], cfg)
+        self.assertTrue(cand.visits)
+        self.assertTrue(all(arrive >= at(10, 30) for o in cand.visits for arrive, _ in o.visits))
+
+
+class BossReportTests(unittest.TestCase):
+    def test_half_hour_rounding(self):
+        self.assertEqual([plan._half_hours(m) for m in (0, 14, 15, 100, 105, 480)], [0, 0, 30, 90, 120, 480])
+
+    def test_rows_show_only_planned_days_and_exam_days(self):
+        cfg = make_config(schedule={"weekly_target_hours": 4},
+                          holidays={"no_work_durations": ["2026-12-09 10:00..10:30"]})
+        result = plan.build_plan([], cfg, MONDAY, SUNDAY)
+        planned = {d.day.strftime("%d.%m.%Y") for w in result.weeks for d in w.days if d.status == "planned"}
+        rows = plan.boss_rows(result, cfg)
+        self.assertTrue(planned)
+        self.assertLessEqual({r[0] for r in rows}, planned | {"09.12.2026"})
+        exam_rows = [r for r in rows if r[0] == "09.12.2026"]
+        self.assertTrue(exam_rows)
+        self.assertEqual(exam_rows[-1][4], "yes")
+        for row in rows:
+            if row[2]:  # a planned block: start on a half hour, length in half hours with a decimal comma
+                self.assertIn(row[2][-2:], ("00", "30"))
+                self.assertRegex(row[3], r"^\d+,[05]$")
+
+    def test_boss_hours_are_the_visit_minus_the_break(self):
+        cfg = make_config(schedule={"weekly_target_hours": 4, "break_minutes": 30})
+        result = plan.build_plan([], cfg, MONDAY, SUNDAY)
+        blocks = plan.boss_blocks(result, cfg)["blocks"]
+        visits = [leave - arrive for w in result.weeks for d in w.days
+                  if d.status == "planned" and d.drawn is not None for arrive, leave in d.drawn.visits]
+        self.assertTrue(visits)
+        self.assertEqual([b["minutes"] for b in blocks], [plan._half_hours(v - 30) for v in visits])
+
+    def test_csv_is_semicolon_separated_with_bom(self):
+        cfg = make_config(schedule={"weekly_target_hours": 4})
+        result = plan.build_plan([], cfg, MONDAY, SUNDAY)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "office.csv"
+            plan.write_boss_csv(result, cfg, path)
+            raw = path.read_bytes()
+            self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))
+            lines = raw.decode("utf-8-sig").splitlines()
+        self.assertEqual(lines[0], "Date;Weekday;Office start;Work hours;Exam")
+
 
 class SelectWeekTests(unittest.TestCase):
     def week_events(self, lectures_by_day):
@@ -254,7 +321,7 @@ class SelectWeekTests(unittest.TestCase):
         cands = [day_candidates(MONDAY.replace(day=7 + i), [], cfg) for i in range(5)]
         chosen = select_week(cands, 600, 600, 120)
         self.assertEqual(len(chosen), 2)
-        self.assertEqual(sum(minutes for _, minutes in chosen.values()), 600)
+        self.assertEqual(sum(work for _, _, work in chosen.values()), 600)
 
     def test_no_target_means_no_planned_days(self):
         cfg = make_config()
@@ -266,7 +333,7 @@ class SelectWeekTests(unittest.TestCase):
     def test_planned_and_fallback_days_do_not_overlap(self):
         cfg = make_config(schedule={"weekly_target_hours": 10, "min_time_at_company": 120})
         events = self.week_events({MONDAY: [(at(10), at(12))]})
-        built = plan.build_plan(events, cfg, MONDAY, MONDAY)
+        built = plan.build_plan(events, cfg, MONDAY, SUNDAY)
         week = built.weeks[0]
         planned = {d.day for d in week.days if d.status == "planned"}
         fallback = {d.day for d in week.days if d.status == "fallback"}
@@ -278,7 +345,7 @@ class SelectWeekTests(unittest.TestCase):
         cfg = make_config(schedule={"weekly_target_hours": 10, "max_hours_per_week": 10,
                                     "min_time_at_company": 120})
         events = self.week_events({MONDAY: [(at(10), at(12))]})
-        built = plan.build_plan(events, cfg, MONDAY, MONDAY)
+        built = plan.build_plan(events, cfg, MONDAY, SUNDAY)
         self.assertLessEqual(built.weeks[0].planned, 600)
 
 
@@ -326,6 +393,15 @@ class ConfigTests(unittest.TestCase):
                                     "no_work": ["2026-11-10"]})
         self.assertEqual(len(cfg.no_work), 2)
 
+    def test_timed_block_is_parsed(self):
+        cfg = make_config(holidays={"no_work_durations": ["2026-12-08 10:00..10:30"]})
+        self.assertEqual(cfg.no_work_durations, ((date(2026, 12, 8), at(10), at(10, 30)),))
+
+    def test_timed_block_errors_are_named(self):
+        for bad in ["2026-12-08", "2026-12-08 11:00..10:00", "2026-12-08 10:00", "2026-13-08 10:00..10:30"]:
+            with self.subTest(bad=bad), self.assertRaisesRegex(ConfigError, "no_work_durations|holidays"):
+                make_config(holidays={"no_work_durations": [bad]})
+
     def test_calendar_range(self):
         cfg = make_config(calendar={"start": "2026-11-01", "end": "2027-02-28"})
         self.assertEqual(cfg.calendar_start, date(2026, 11, 1))
@@ -365,6 +441,46 @@ class ConfigTests(unittest.TestCase):
         self.assertIsNotNone(cfg.car)
 
 
+CALENDAR_WEEK = '[calendar]\nstart = "2026-12-07"\nend = "2026-12-13"\n'
+
+
+class BreakTests(unittest.TestCase):
+    def test_break_is_not_paid_work(self):
+        cfg = make_config(schedule={"break_minutes": 30})
+        best = min(day_candidates(MONDAY, [], cfg).visits, key=lambda o: o.travel)
+        self.assertEqual(best.visit_minutes, 560)  # 07:40 to 17:00 at the job
+        self.assertEqual(best.work, 530)
+
+    def test_max_shift_is_work_time_so_the_visit_gets_the_break_on_top(self):
+        cfg = make_config(schedule={"break_minutes": 30, "max_shift_minutes": 200})
+        best = min(day_candidates(MONDAY, [], cfg).visits, key=lambda o: o.travel)
+        self.assertEqual(best.visit_minutes, 230)
+        self.assertEqual(best.work, 200)
+
+    def test_weekly_target_counts_work_not_visit_time(self):
+        cfg = make_config(schedule={"break_minutes": 30, "min_time_at_company": 120})
+        cands = [day_candidates(date(2026, 12, 7 + i), [], cfg) for i in range(5)]
+        chosen = select_week(cands, 600, 600, 120, 30)
+        self.assertEqual(sum(work for _, _, work in chosen.values()), 600)
+        for option, visit, work in chosen.values():
+            self.assertEqual(visit - work, 30)  # every visit keeps its break
+
+    def test_break_longer_than_the_minimum_visit_is_rejected(self):
+        with self.assertRaisesRegex(ConfigError, "break_minutes"):
+            make_config(schedule={"break_minutes": 150})
+
+
+class CalendarRangeTests(unittest.TestCase):
+    def test_days_outside_the_calendar_are_not_planned(self):
+        cfg = make_config()
+        events = [{"date": "2026-12-08", "start_min": 600, "end_min": 720, "skipped": False}]
+        built = plan.build_plan(events, cfg, date(2026, 12, 8), date(2026, 12, 11))
+        statuses = {d.day.day: d.status for d in built.weeks[0].days}
+        self.assertEqual(statuses[7], "outside")
+        self.assertEqual(statuses[12], "outside")
+        self.assertTrue(all(d.drawn is None for d in built.weeks[0].days if d.status == "outside"))
+
+
 class EndToEndTests(unittest.TestCase):
     CSV = (
         '﻿"WOCHENTAG","DATUM","VON","BIS","DAUER_IN_MINUTEN","LV_NUMMER","TITEL",'
@@ -395,7 +511,7 @@ class EndToEndTests(unittest.TestCase):
 
     def test_main_writes_plan_with_modes_and_statuses(self):
         with tempfile.TemporaryDirectory() as tmp:
-            data, summary = self.run_main(Path(tmp))
+            data, summary = self.run_main(Path(tmp), self.CONFIG + CALENDAR_WEEK)
         self.assertEqual(data["calendar"]["start"], "2026-12-07")
         self.assertEqual(len(data["days"]), 7)
         self.assertTrue(any(d["status"] == "planned" for d in data["days"]))
@@ -419,6 +535,21 @@ class EndToEndTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 with contextlib.redirect_stderr(io.StringIO()):
                     plan.main([str(csv_path), "--config", str(Path(tmp) / "nope.toml")])
+
+
+class CompileTests(unittest.TestCase):
+    def test_json_outside_the_project_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            outside = Path(tmp) / "plan.json"
+            outside.write_text("{}", encoding="utf-8")
+            with unittest.mock.patch.object(plan.shutil, "which", return_value="typst"):
+                with self.assertRaisesRegex(ValueError, "inside the project folder"):
+                    plan.compile_pdf(outside)
+
+    def test_missing_typst_is_reported(self):
+        with unittest.mock.patch.object(plan.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "typst"):
+                plan.compile_pdf(ROOT / "data" / "plan.json")
 
 
 if __name__ == "__main__":

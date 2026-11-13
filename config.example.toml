@@ -42,6 +42,7 @@ max_shift_minutes = 600      # longest single work block. Default: no limit
 buffer_minutes = 10          # extra minutes kept free on each side of a work block that touches a lecture. Default: 0
 work_days = ["mon", "tue", "wed", "thu", "fri"]   # weekdays you can work. Default: Monday to Friday
 weekly_target_hours = 10     # hours the planner fills up to each week (the choice of days is optimised for it). Default: none
+break_minutes = 30           # unpaid break inside each visit (minutes); max_shift_minutes is work time. Default: 0
 max_hours_per_week = 10     # legal or personal maximum; never planned above it. Default: the weekly target
 
 [lectures]
@@ -58,6 +59,8 @@ show_skipped = true
 no_work = ["2026-11-10"]
 # Optional: dates or ranges when the company is closed. Lectures still happen; no work is planned.
 company_closed = ["2026-12-24..2027-01-01"]
+# Optional: a timed blocker on one day, e.g. an exam. No work that day before the end time.
+# no_work_durations = ["2026-12-15 10:00..10:30"]
 
 # Optional: change the values for one weekday only.
 # Table names: mon, tue, wed, thu, fri, sat, sun

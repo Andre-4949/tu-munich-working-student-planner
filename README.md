@@ -62,20 +62,22 @@ minutes; clock times are quoted `"HH:MM"`. Unknown keys are reported as errors, 
 | `[car] distance_in_km`, `liters_per_100km`, `fuel_price_per_liter` | no (all three or none) | none | Fuel estimate: every car leg drives `distance_in_km` |
 | `[schedule] earliest_wake_up` | yes | | Earliest time you get up, `"HH:MM"` |
 | `[schedule] latest_at_job` | yes | | Latest time you may still be at the job, `"HH:MM"` (not a duration) |
-| `[schedule] min_time_at_company` | yes | | Shortest work visit worth going to the job for, minutes |
+| `[schedule] min_time_at_company` | yes | | Shortest visit to the job worth going for, minutes; the visit includes the break |
+| `[schedule] break_minutes` | no | `0` | Unpaid break taken inside each visit, minutes. Work time = visit − break |
 | `[schedule] weekly_target_hours` | no | none | Hours the planner fills up to each week, e.g. `20` |
 | `[schedule] max_hours_per_week` | no | the target | Never planned above this per week |
 | `[schedule] ready_minutes` | no | `0` | Time between getting up and leaving home |
 | `[schedule] earliest_at_job` | no | none | Office opens; no work before this, `"HH:MM"` |
-| `[schedule] max_shift_minutes` | no | none | Longest single visit, minutes |
+| `[schedule] max_shift_minutes` | no | none | Longest single *work* time, minutes. The visit may be this plus the break |
 | `[schedule] buffer_minutes` | no | `0` | Extra minutes kept free on each side of a visit that touches a lecture |
 | `[schedule] work_days` | no | Mon–Fri | Weekdays you can work: `["mon", "tue", …]` |
 | `[lectures] not_attended` | no | `[]` | `LV_NUMMER` values to ignore completely (leading zeros do not matter) |
 | `[lectures] sessions_not_attended` | no | `[]` | Only some session types, as `"LV_NUMMER:LV_ART"`, e.g. `"0000000104:UE"` |
 | `[lectures] show_skipped` | no | `true` | `true` draws skipped sessions hatched and labelled "skipped"; `false` hides them |
 | `[holidays] no_work` | no | `[]` | Dates or ranges without work: `"2026-12-24"` or `"2026-12-24..2027-01-06"` |
+| `[holidays] no_work_durations` | no | `[]` | Timed blocker on one day, `"2026-12-15 10:00..10:30"` (e.g. an exam). No work that day before the end time; work after it is still planned |
 | `[holidays] company_closed` | no | `[]` | Dates or ranges when the company is closed. Lectures still happen; no work is planned. Merged with `no_work` |
-| `[calendar] start`, `end` | no | export range | First and last day of the planned and drawn calendar |
+| `[calendar] start`, `end` | no | export range | First and last day of the planned and drawn calendar, e.g. `"2026-12-01"` and `"2027-02-05"`. Days outside it are shaded and not planned |
 | `[day_overrides.<weekday>]` | no | | `latest_at_job` and/or `earliest_at_job` for one weekday, e.g. `[day_overrides.fri]` |
 
 Skipped sessions are ignored for the work visits: they do not block time, and a visit is computed
@@ -103,6 +105,32 @@ python -I scripts/plan.py path/to/personal_YYYYMMDD_HHMMSS.csv --config config.t
 # 2. render the PDF
 typst compile calendar.typ plan.pdf
 ```
+
+Or do both in one step with `--compile`, which runs the Typst command afterwards (the JSON must be inside the project folder):
+
+```sh
+python -I scripts/plan.py path/to/personal_YYYYMMDD_HHMMSS.csv --config config.toml --compile
+```
+
+For your supervisor, add `--boss-csv` (optional path, default `data/office-hours.csv`). It writes a
+semicolon-separated CSV that Excel opens with the columns already split: date, weekday, rough office
+start (rounded to the half hour), work hours (the visit minus the unpaid break, rounded to the half hour) and
+whether the day is an exam day (a day with a `no_work_durations` entry). It contains only planned days;
+fallback days, lectures, the car and the fuel estimate are left out:
+
+```sh
+python -I scripts/plan.py path/to/personal_YYYYMMDD_HHMMSS.csv --config config.toml --boss-csv
+```
+
+`--boss-pdf` (optional path, default `data/office-hours.pdf`) writes the same monthly calendar as your
+own PDF, but only the office blocks and the exam days. Lectures, course names, travel, fuel and the
+week pages are left out. It compiles with Typst, so it needs `typst` on the PATH:
+
+```sh
+python -I scripts/plan.py path/to/personal_YYYYMMDD_HHMMSS.csv --config config.toml --boss-pdf
+```
+
+Both boss files use the same data (`"boss"` in `data/plan.json`), so they always agree.
 
 Try it out with the fictional example first:
 

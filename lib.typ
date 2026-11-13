@@ -19,7 +19,7 @@
     sessions: "Sessions", period: "Period",
     lectures: "Lectures", planned: "Planned", fallback: "Fallback", target: "Target",
     delta: "vs. target", travel: "Travel", extra: "extra", possible: "possible",
-    work: "Work", skipped: "skipped", nothing: "none", no-work: "no work", commute: "commute",
+    exam: "Exam", office: "Office", work: "Work", visit: "visit", unpaid: "break", skipped: "skipped", nothing: "none", no-work: "no work", commute: "commute",
     default-group: "Standardgruppe",
     types: (VO: "Lecture", UE: "Exercise", VU: "Lecture + Exercise",
       VI: "Lecture + Exercise", PR: "Lab", SE: "Seminar", PS: "Proseminar",
@@ -35,13 +35,14 @@
       car: "Car times", wake: "Earliest wake-up", ready: "Ready after wake-up",
       latest: "Latest at job", earliest-job: "Earliest at job",
       min-block: "Shortest work block", max-block: "Longest work block",
-      buffer: "Buffer next to lectures", work-days: "Work days",
+      buffer: "Buffer next to lectures", pause: "Break inside a visit", work-days: "Work days",
       target: "Weekly target", maximum: "Weekly maximum", fuel: "Fuel estimate",
       not-attended: "Courses not attended", sessions: "Sessions not attended",
       show-skipped: "Skipped sessions in PDF", no-work: "Closed / no work",
+      blocked: "Timed blocks (no work before)",
       overrides: "Day overrides", calendar: "Calendar range",
     ),
-    yes: "shown", hidden: "hidden",
+    yes: "shown", hidden: "hidden", outside: "outside calendar",
     generated: "Generated from a TUMonline export on",
   ),
   de: (
@@ -58,7 +59,7 @@
     sessions: "Termine", period: "Zeitraum",
     lectures: "Vorlesungen", planned: "Geplant", fallback: "Ersatz", target: "Ziel",
     delta: "vs. Ziel", travel: "Fahrt", extra: "zusätzlich", possible: "möglich",
-    work: "Arbeit", skipped: "übersprungen", nothing: "keine", no-work: "keine Arbeit",
+    exam: "Prüfung", office: "Büro", work: "Arbeit", visit: "Besuch", unpaid: "Pause", skipped: "übersprungen", nothing: "keine", no-work: "keine Arbeit",
     commute: "Anfahrt",
     default-group: "Standardgruppe",
     types: (VO: "Vorlesung", UE: "Übung", VU: "Vorlesung + Übung",
@@ -74,13 +75,14 @@
       car: "Auto-Fahrzeiten", wake: "Frühestes Aufstehen", ready: "Fertig machen nach dem Aufstehen",
       latest: "Spätestens im Job", earliest-job: "Frühestens im Job",
       min-block: "Kürzester Arbeitsblock", max-block: "Längster Arbeitsblock",
-      buffer: "Puffer neben Vorlesungen", work-days: "Arbeitstage",
+      buffer: "Puffer neben Vorlesungen", pause: "Pause während eines Besuchs", work-days: "Arbeitstage",
       target: "Wochenziel", maximum: "Wochenmaximum", fuel: "Kraftstoff-Schätzung",
       not-attended: "Nicht besuchte Veranstaltungen", sessions: "Nicht besuchte Termine",
       show-skipped: "Übersprungene im PDF", no-work: "Geschlossen / keine Arbeit",
+      blocked: "Zeitliche Sperren (keine Arbeit davor)",
       overrides: "Tages-Ausnahmen", calendar: "Kalenderzeitraum",
     ),
-    yes: "angezeigt", hidden: "ausgeblendet",
+    yes: "angezeigt", hidden: "ausgeblendet", outside: "außerhalb des Kalenders",
     generated: "Erstellt aus einem TUMonline-Export am",
   ),
 )
@@ -205,6 +207,7 @@
     (t.cfg.earliest-job, if cfg.earliest_at_job == none [#t.nothing] else [#cfg.earliest_at_job]),
     (t.cfg.min-block, [#cfg.min_time_at_company min]),
     (t.cfg.max-block, if cfg.max_shift_minutes == none [#t.nothing] else [#cfg.max_shift_minutes min]),
+    (t.cfg.pause, [#cfg.break_minutes min]),
     (t.cfg.buffer, [#cfg.buffer_minutes min]),
     (t.cfg.work-days, t.days-short.enumerate()
       .filter(p => (p.at(0) + 1) in cfg.work_days).map(p => p.at(1)).join(", ")),
@@ -217,6 +220,7 @@
     (t.cfg.sessions, if cfg.sessions_not_attended.len() == 0 [#t.nothing] else [#cfg.sessions_not_attended.join(", ")]),
     (t.cfg.show-skipped, if cfg.show_skipped [#t.yes] else [#t.hidden]),
     (t.cfg.no-work, if cfg.no_work.len() == 0 [#t.nothing] else [#cfg.no_work.join(", ")]),
+    (t.cfg.blocked, if cfg.no_work_durations.len() == 0 [#t.nothing] else [#cfg.no_work_durations.join(", ")]),
     (t.cfg.overrides, if cfg.day_overrides.len() == 0 [#t.nothing] else [
       #cfg.day_overrides.pairs().map(p => {
         let day = t.days-short.at(weekday-keys.position(x => x == p.at(0)))
@@ -332,6 +336,12 @@
 }
 
 // Work chip in the month view.
+// The unpaid break of a visit, shown in brackets after the work time: "[+ 0h45 break]".
+#let break-note(s, t) = {
+  let b = s.minutes - s.work_minutes
+  if b > 0 { [ \[+ #dur(b) #t.unpaid\]] }
+}
+
 #let work-chip(s, t) = {
   let (fill, line, ink) = if s.status == "planned" {
     (planned-fill, planned-line, planned-ink)
@@ -342,12 +352,20 @@
     width: 100%, above: 0pt, below: 1.5pt,
     fill: fill, stroke: (left: 2pt + line),
     inset: (x: 2.5pt, y: 1.5pt),
-    text(size: 6.8pt, fill: ink)[*#t.work #s.start–#s.end* #dur(s.minutes)],
+    text(size: 6.8pt, fill: ink)[*#t.work #s.start–#s.end* #dur(s.work_minutes)#break-note(s, t)],
   )
 }
 
 // Month grid: lectures, planned work and the hours per day.
-#let month-page(year, month, by-date, days-info, days, t, title) = {
+// The supervisor view of a month: `boss` = (blocks: by date, exams: dates); lectures and travel are left out.
+#let boss-chip(b, t) = block(
+  width: 100%, above: 0pt, below: 1.5pt,
+  fill: planned-fill, stroke: (left: 2pt + planned-line),
+  inset: (x: 2.5pt, y: 1.5pt),
+  text(size: 6.8pt, fill: planned-ink)[*#t.office #b.start* #dur(b.minutes)],
+)
+
+#let month-page(year, month, by-date, days-info, days, t, title, boss: none) = {
   let first = datetime(year: year, month: month, day: 1)
   let next-first = if month == 12 { datetime(year: year + 1, month: 1, day: 1) } else {
     datetime(year: year, month: month + 1, day: 1)
@@ -383,25 +401,33 @@
           ..days.map(wd => {
             let d = add-days(monday, wd - 1)
             let in-month = d.month() == month
-            let items = if in-month { by-date.at(iso(d), default: ()) } else { () }
+            let items = if in-month and boss == none { by-date.at(iso(d), default: ()) } else { () }
             let info = days-info.at(iso(d), default: none)
-            let planned = if info != none and info.status == "planned" { info.work_minutes } else { 0 }
-            let fallback = if info != none and info.status == "fallback" { info.work_minutes } else { 0 }
+            let blocks = if in-month and boss != none { boss.blocks.at(iso(d), default: ()) } else { () }
+            let exam = boss != none and iso(d) in boss.exams
+            let planned = if boss == none and info != none and info.status == "planned" { info.work_minutes } else { 0 }
+            let fallback = if boss == none and info != none and info.status == "fallback" { info.work_minutes } else { 0 }
+            let shaded = if boss != none { blocks.len() > 0 } else { planned > 0 }
             grid.cell(
               inset: 3pt,
-              fill: if not in-month { luma(248) } else if planned > 0 { planned-day } else { white },
+              fill: if not in-month { luma(248) } else if info != none and info.status == "outside" { luma(242) } else if shaded { planned-day } else { white },
               block(width: 100%, height: 100%, clip: true, {
                 if in-month {
                   grid(
                     columns: (1fr, auto),
                     text(size: 9pt, weight: "bold", fill: luma(90))[#d.day()],
-                    if planned > 0 {
+                    if boss != none {
+                      if exam { text(size: 8pt, weight: "bold", fill: luma(60))[#t.exam] }
+                    } else if planned > 0 {
                       text(size: 8pt, weight: "bold", fill: planned-ink)[#dur(planned)]
                     } else if fallback > 0 {
                       text(size: 8pt, fill: fallback-ink)[#dur(fallback) #t.fallback]
                     },
                   )
                   v(1pt)
+                  for b in blocks {
+                    boss-chip(b, t)
+                  }
                   for it in items.sorted(key: it => it.start_min) {
                     if it.kind == "work" {
                       work-chip(it, t)
@@ -467,12 +493,22 @@
     let by-day-legs = index-by-date(legs)
 
     block(width: 100%, height: head-h + grid-h, {
+      // days outside the calendar range are shaded and carry no plan
+      for (i, wd) in days.enumerate() {
+        let info = days-info.at(iso(add-days(monday, wd - 1)), default: none)
+        if info != none and info.status == "outside" {
+          place(top + left, dx: time-w + i * col-w, dy: head-h,
+            rect(width: col-w, height: grid-h, fill: luma(242), stroke: none))
+        }
+      }
       // day headers: date, planned or fallback work, and the travel of the plan
       for (i, wd) in days.enumerate() {
         let d = add-days(monday, wd - 1)
         let info = days-info.at(iso(d), default: none)
         let line = if info == none {
           none
+        } else if info.status == "outside" {
+          text(size: 7.5pt, fill: luma(150))[#t.outside]
         } else if info.status == "planned" {
           text(size: 8pt, weight: "bold", fill: planned-ink)[#t.planned #dur(info.work_minutes)]
         } else if info.status == "fallback" {
@@ -546,7 +582,7 @@
                 set text(size: 8pt, fill: if planned { planned-ink } else { fallback-ink })
                 text(weight: "bold")[#if planned { t.planned } else { t.fallback } #s.start–#s.end]
                 linebreak()
-                text(size: 7.5pt, weight: "bold")[#dur(s.minutes)]
+                text(size: 7.5pt, weight: "bold")[#dur(s.work_minutes) #t.work#break-note(s, t)]
               },
             ))
         }
@@ -600,9 +636,13 @@
   lang: "en",
   views: ("overview", "month", "week"),
   include-empty-weeks: false,
+  audience: "me",
   font: ("Arial", "Liberation Sans", "Libertinus Serif"),
 ) = {
   let t = i18n.at(lang)
+  // The supervisor gets the monthly view only: office blocks and exam days, nothing else.
+  let boss = audience == "boss"
+  let page-views = if boss { ("month",) } else { views }
   let all-events = plan.events.map(e => e + (d: parse-date(e.date)))
   let show-skipped = plan.config.show_skipped
   let visible = if show-skipped { all-events } else { all-events.filter(e => not e.skipped) }
@@ -619,7 +659,11 @@
   let events = visible.map(e => e + (color: color-of(e)))
 
   // Visible weekdays: Mon-Fri, plus the weekend only if something happens there.
-  let wds = (all-events.map(e => e.d.weekday()) + slots.map(s => parse-date(s.date).weekday()))
+  let wds = if boss {
+    plan.boss.blocks.map(b => parse-date(b.date).weekday()) + plan.boss.exams.map(e => parse-date(e).weekday())
+  } else {
+    (all-events.map(e => e.d.weekday()) + slots.map(s => parse-date(s.date).weekday()))
+  }
   let last-wd = calc.max(5, ..wds)
   let days = range(1, last-wd + 1)
 
@@ -633,12 +677,21 @@
   let last = parse-date(plan.calendar.end)
   let subtitle = [#fmt-date-long(first, t) – #fmt-date-long(last, t)]
 
-  let month-items = index-by-date(
+  let month-items = if boss { (:) } else { index-by-date(
     events.map(e => (date: e.date, kind: "lecture", start_min: e.start_min, title: e.title,
       start: e.start, color: e.color, skipped: e.skipped))
     + slots.map(s => (date: s.date, kind: "work", start_min: s.start_min, start: s.start,
-      end: s.end, minutes: s.minutes, status: s.status))
-  )
+      end: s.end, minutes: s.minutes, work_minutes: s.work_minutes, status: s.status))
+  ) }
+
+  // Supervisor view: the office blocks per date, and the exam dates.
+  let boss-blocks = (:)
+  if boss {
+    for b in plan.boss.blocks {
+      boss-blocks.insert(b.date, boss-blocks.at(b.date, default: ()) + (b,))
+    }
+  }
+  let boss-info = if boss { (blocks: boss-blocks, exams: plan.boss.exams) } else { none }
 
   set document(title: title)
   set page(paper: "a4", flipped: true, margin: 1.2cm,
@@ -649,20 +702,20 @@
 
   let pages = ()
 
-  if "overview" in views {
+  if "overview" in page-views {
     pages.push(overview-page(plan, all-events, color-of, t, title, subtitle))
   }
 
-  if "month" in views {
+  if "month" in page-views {
     let y = first.year()
     let m = first.month()
     while y < last.year() or (y == last.year() and m <= last.month()) {
-      pages.push(month-page(y, m, month-items, days-info, days, t, title))
+      pages.push(month-page(y, m, month-items, days-info, days, t, title, boss: boss-info))
       if m == 12 { y += 1; m = 1 } else { m += 1 }
     }
   }
 
-  if "week" in views {
+  if "week" in page-views {
     for week in plan.weeks {
       let monday = parse-date(week.monday)
       let sunday = add-days(monday, 6)

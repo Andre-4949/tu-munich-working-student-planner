@@ -31,7 +31,10 @@ import argparse
 import csv
 import json
 import math
+import os
 import re
+import shutil
+import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass, field
@@ -227,10 +230,10 @@ _CAR = {"home_to_tum", "home_to_job", "tum_to_job", "job_to_tum", "job_to_home",
         "distance_in_km", "liters_per_100km", "fuel_price_per_liter"}
 _FUEL_KEYS = ("distance_in_km", "liters_per_100km", "fuel_price_per_liter")
 _SCHEDULE = {"earliest_wake_up", "ready_minutes", "latest_at_job", "earliest_at_job",
-             "min_time_at_company", "max_shift_minutes", "buffer_minutes", "work_days",
+             "min_time_at_company", "max_shift_minutes", "break_minutes", "buffer_minutes", "work_days",
              "weekly_target_hours", "max_hours_per_week"}
 _LECTURES = {"not_attended", "sessions_not_attended", "show_skipped"}
-_HOLIDAYS = {"no_work", "company_closed"}
+_HOLIDAYS = {"no_work", "company_closed", "no_work_durations"}
 _CALENDAR = {"start", "end"}
 _OVERRIDE = {"latest_at_job", "earliest_at_job"}
 
@@ -263,7 +266,8 @@ class Config:
     ready_minutes: int
     latest_at_job: int
     earliest_at_job: int | None
-    min_time_at_company: int
+    min_time_at_company: int       # minimum length of a visit, break included
+    break_minutes: int             # break taken during each visit; not paid work time
     max_shift_minutes: int | None
     buffer_minutes: int
     work_days: frozenset[int]      # date.weekday() values, 0 = Monday
@@ -275,6 +279,8 @@ class Config:
     show_skipped: bool
     # no work at the job: inclusive date ranges (company closures and personal days off)
     no_work: tuple[tuple[date, date], ...]
+    # single days with a timed blocker (day, start, end in minutes): no work before `end` that day
+    no_work_durations: tuple[tuple[date, int, int], ...]
     # per weekday (date.weekday()) overrides of latest/earliest_at_job
     day_overrides: dict[int, dict[str, int]]
     # the planned range; None means "from the first to the last session of the export"
@@ -364,6 +370,24 @@ def _parse_ranges(value, name: str) -> tuple[tuple[date, date], ...]:
     return tuple(ranges)
 
 
+def _parse_blocked_times(value, name: str) -> tuple[tuple[date, int, int], ...]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ConfigError(f'{name}: expected a list like ["2026-12-08 10:00..10:30"]')
+    blocks = []
+    for item in value:
+        day_text, sep, times = item.strip().partition(" ")
+        start_text, dots, end_text = times.partition("..")
+        if not sep or not dots:
+            raise ConfigError(f'{name}: expected "YYYY-MM-DD HH:MM..HH:MM", got {item!r}')
+        day = _parse_date(day_text, name)
+        start = _parse_clock(start_text, name)
+        end = _parse_clock(end_text, name)
+        if end <= start:
+            raise ConfigError(f"{name}: {item!r} ends before it starts")
+        blocks.append((day, start, end))
+    return tuple(blocks)
+
+
 def _str_list(value, name: str) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise ConfigError(f'{name}: expected a list of strings like ["0000000101"]')
@@ -416,6 +440,7 @@ def config_from_dict(raw: dict) -> Config:
     latest_at_job = _get(schedule, "schedule", "latest_at_job", _parse_clock)
     earliest_at_job = _get(schedule, "schedule", "earliest_at_job", _parse_clock, None)
     min_time = _get(schedule, "schedule", "min_time_at_company", _parse_minutes)
+    break_minutes = _get(schedule, "schedule", "break_minutes", _parse_minutes, 0)
     max_shift = _get(schedule, "schedule", "max_shift_minutes", _parse_minutes, None)
     buffer_minutes = _get(schedule, "schedule", "buffer_minutes", _parse_minutes, 0)
     work_days = _get(schedule, "schedule", "work_days", _parse_weekdays, frozenset(range(5)))
@@ -440,6 +465,7 @@ def config_from_dict(raw: dict) -> Config:
     holidays = _table(raw, "holidays", _HOLIDAYS)
     no_work = _get(holidays, "holidays", "no_work", _parse_ranges, ())
     closed = _get(holidays, "holidays", "company_closed", _parse_ranges, ())
+    blocked = _get(holidays, "holidays", "no_work_durations", _parse_blocked_times, ())
 
     calendar = _table(raw, "calendar", _CALENDAR)
     cal_start = _get(calendar, "calendar", "start", _parse_date, None)
@@ -468,6 +494,8 @@ def config_from_dict(raw: dict) -> Config:
 
     if min_time < 1:
         raise ConfigError("schedule.min_time_at_company: must be at least 1 minute")
+    if break_minutes > min_time:
+        raise ConfigError("schedule.break_minutes: cannot be longer than schedule.min_time_at_company")
     if not work_days:
         raise ConfigError("schedule.work_days: list at least one weekday")
 
@@ -476,13 +504,14 @@ def config_from_dict(raw: dict) -> Config:
         home_to_job=home_to_job, job_to_home=job_to_home, car=car,
         earliest_wake_up=earliest_wake_up, ready_minutes=ready_minutes,
         latest_at_job=latest_at_job, earliest_at_job=earliest_at_job,
-        min_time_at_company=min_time, max_shift_minutes=max_shift,
+        min_time_at_company=min_time, max_shift_minutes=max_shift, break_minutes=break_minutes,
         buffer_minutes=buffer_minutes, work_days=work_days,
         weekly_target_minutes=target, max_week_minutes=max_week,
         not_attended=frozenset(normalize_lv(n) for n in not_attended if normalize_lv(n)),
         sessions_not_attended=frozenset(sessions),
         show_skipped=show_skipped,
         no_work=tuple(no_work) + tuple(closed),
+        no_work_durations=blocked,
         day_overrides=overrides,
         calendar_start=cal_start,
         calendar_end=cal_end,
@@ -515,6 +544,7 @@ def config_for_output(cfg: Config) -> dict:
         "latest_at_job": hm(cfg.latest_at_job),
         "earliest_at_job": None if cfg.earliest_at_job is None else hm(cfg.earliest_at_job),
         "min_time_at_company": cfg.min_time_at_company,
+        "break_minutes": cfg.break_minutes,
         "max_shift_minutes": cfg.max_shift_minutes,
         "buffer_minutes": cfg.buffer_minutes,
         "work_days": sorted(day + 1 for day in cfg.work_days),  # ISO: 1 = Monday
@@ -525,6 +555,7 @@ def config_for_output(cfg: Config) -> dict:
         "show_skipped": cfg.show_skipped,
         "no_work": [a.isoformat() if a == b else f"{a.isoformat()}..{b.isoformat()}"
                     for a, b in cfg.no_work],
+        "no_work_durations": [f"{d.isoformat()} {hm(s)}..{hm(e)}" for d, s, e in cfg.no_work_durations],
         "day_overrides": {
             WEEKDAY_NAMES[day]: {k: hm(v) for k, v in values.items()}
             for day, values in sorted(cfg.day_overrides.items())
@@ -634,7 +665,9 @@ def schedule_gap(day: date, spec: GapSpec, legs, cfg: Config, opening: int, late
     visit_index = next((i for i, (_, d, _) in enumerate(legs) if d == JOB), None)
 
     if visit_index is None:
-        if spec.t1 is not None and spec.t0 + total > spec.t1:
+        # staying where you are needs no window: a gap shorter than the buffers is still
+        # a gap at TUM; only travel has to fit between the lectures
+        if legs and spec.t1 is not None and spec.t0 + total > spec.t1:
             return None
         return Gap(_chain(day, legs, durations, spec.t0), None)
 
@@ -646,7 +679,8 @@ def schedule_gap(day: date, spec: GapSpec, legs, cfg: Config, opening: int, late
         if spec.t1 is not None:
             leave = min(leave, spec.t1 - after)
         if cfg.max_shift_minutes is not None:
-            leave = min(leave, arrive + cfg.max_shift_minutes)
+            # max_shift_minutes is work time; the break is added on top of it
+            leave = min(leave, arrive + cfg.max_shift_minutes + cfg.break_minutes)
         if leave - arrive < cfg.min_time_at_company:
             return None
     else:
@@ -680,7 +714,9 @@ class Option:
         self.legs: list[Leg] = [leg for gap in gaps for leg in gap.legs]
         self.visits: list[tuple[int, int]] = [gap.visit for gap in gaps if gap.visit]
         self.travel = sum(leg.minutes for leg in self.legs)
-        self.work = sum(leave - arrive for arrive, leave in self.visits)
+        self.visit_minutes = sum(leave - arrive for arrive, leave in self.visits)
+        # paid work = time at the company minus the break taken in each visit
+        self.work = sum(leave - arrive - cfg.break_minutes for arrive, leave in self.visits)
         self.extra = 0                # travel above the cheapest commute without work
 
     @property
@@ -737,6 +773,10 @@ def day_limits(day: date, cfg: Config) -> tuple[int, int]:
     override = cfg.day_overrides.get(day.weekday(), {})
     latest = override.get("latest_at_job", cfg.latest_at_job)
     opening = override.get("earliest_at_job", cfg.earliest_at_job)
+    # a timed blocker (e.g. an exam): no work on that day before the blocker ends
+    for block_day, _, end in cfg.no_work_durations:
+        if block_day == day:
+            opening = end if opening is None else max(opening, end)
     return (0 if opening is None else opening), latest
 
 
@@ -790,35 +830,38 @@ def day_candidates(day: date, blocks: list[tuple[int, int]], cfg: Config) -> Day
 
 
 def visit_choices(option: Option, min_time: int) -> list[int]:
-    """Possible lengths of a planned visit: the full length, or shorter in steps of STEP."""
+    """Possible visit lengths (break included): the full length, or shorter in steps of STEP."""
     if len(option.visits) != 1:
-        return [option.work]
-    full = option.work
+        return [option.visit_minutes]
+    full = option.visit_minutes
     first = math.ceil(min_time / STEP) * STEP
     return [full] + [minutes for minutes in range(first, full, STEP)]
 
 
-def select_week(cands: list[DayCandidates], target: int, limit: int, min_time: int):
-    """Pick one option per day (and a length for its visit) that reaches `target` at least cost.
+def select_week(cands: list[DayCandidates], target: int, limit: int, min_time: int,
+                break_minutes: int = 0):
+    """Pick one option per day (and a visit length) that reaches `target` work at least cost.
 
-    Dynamic programme over the hours planned so far (in STEP minutes, never above `limit`).
-    Returns {day: (option, hours)} for the days that get a planned visit.
+    Dynamic programme over the paid work planned so far (in STEP minutes, never above `limit`).
+    Returns {day: (option, visit_minutes, work_minutes)} for the days that get a planned visit.
     """
     states: dict[int, tuple[int, tuple]] = {0: (0, ())}
     for cand in cands:
-        choices = [(None, 0, 0)]
+        # (option, visit length, work length, cost); the baseline has no visit and no work
+        choices = [(None, 0, 0, 0)]
         for option in cand.visits:
-            for minutes in visit_choices(option, min_time):
-                choices.append((option, minutes, option.cost))
+            for visit in visit_choices(option, min_time):
+                work = visit - break_minutes if len(option.visits) == 1 else option.work
+                choices.append((option, visit, work, option.cost))
         nxt: dict[int, tuple[int, tuple]] = {}
         for hours, (cost, chosen) in states.items():
-            for option, minutes, extra in choices:
-                total = hours + minutes
+            for option, visit, work, extra in choices:
+                total = hours + work
                 if total > limit:
                     continue
                 new_cost = cost + extra
                 if total not in nxt or new_cost < nxt[total][0]:
-                    nxt[total] = (new_cost, chosen + ((cand.day, option, minutes),))
+                    nxt[total] = (new_cost, chosen + ((cand.day, option, visit, work),))
         states = nxt
 
     reached = [(cost, -hours, chosen) for hours, (cost, chosen) in states.items() if hours >= target]
@@ -827,7 +870,7 @@ def select_week(cands: list[DayCandidates], target: int, limit: int, min_time: i
     else:
         best_hours = max(states)
         chosen = states[best_hours][1]
-    return {day: (option, minutes) for day, option, minutes in chosen if option is not None}
+    return {day: (option, visit, work) for day, option, visit, work in chosen if option is not None}
 
 
 # ----------------------------------------------------------- the planning ---
@@ -879,22 +922,27 @@ def build_plan(events: list[dict], cfg: Config, first: date, last: date) -> Plan
     while monday <= end:
         days = [monday + timedelta(days=offset) for offset in range(7)]
         blocks = {d: merge_intervals(attended.get(d, [])) for d in days}
-        cands = {d: day_candidates(d, blocks[d], cfg) for d in days}
-        chosen: dict[date, tuple[Option, int]] = {}
+        # days outside the calendar range keep their place in the week but are not planned
+        cands = {d: day_candidates(d, blocks[d], cfg) if first <= d <= last
+                 else DayCandidates(d, None, []) for d in days}
+        chosen: dict[date, tuple[Option, int, int]] = {}
         if cfg.weekly_target_minutes is not None:
             limit = cfg.max_week_minutes if cfg.max_week_minutes is not None else cfg.weekly_target_minutes
             chosen = select_week([cands[d] for d in days], cfg.weekly_target_minutes, limit,
-                                 cfg.min_time_at_company)
+                                 cfg.min_time_at_company, cfg.break_minutes)
         fallback = _fallback(cands, chosen, cfg.weekly_target_minutes)
 
         results = []
         for d in days:
             cand = cands[d]
+            if not (first <= d <= last):
+                results.append(DayResult(d, "outside", None, None, 0))
+                continue
             best = min(cand.visits, key=lambda o: (o.value, -o.work)) if cand.visits else None
             if d in chosen:
-                option, minutes = chosen[d]
-                drawn = option if minutes == option.work else option.shortened(minutes)
-                results.append(DayResult(d, "planned", drawn, best, minutes))
+                option, visit, work = chosen[d]
+                drawn = option if visit == option.visit_minutes else option.shortened(visit)
+                results.append(DayResult(d, "planned", drawn, best, work))
             elif d in fallback:
                 results.append(DayResult(d, "fallback", best, best, best.work))
             else:
@@ -945,6 +993,7 @@ def _option_json(option: Option | None) -> dict | None:
         return None
     return {
         "work_minutes": option.work,
+        "visit_minutes": option.visit_minutes,
         "travel_minutes": option.travel,
         "extra_minutes": option.extra,
         "fuel_eur": option.fuel_eur,
@@ -980,7 +1029,9 @@ def plan_to_json(events: list[dict], plan: Plan, cfg: Config) -> dict:
                     slots.append({
                         "date": result.day.isoformat(), "weekday": result.day.isoweekday(),
                         "start": hm(arrive), "end": hm(leave), "start_min": arrive,
-                        "end_min": leave, "minutes": leave - arrive, "status": result.status,
+                        "end_min": leave, "minutes": leave - arrive,
+                        "work_minutes": leave - arrive - cfg.break_minutes,
+                        "status": result.status,
                     })
             days.append({
                 "date": result.day.isoformat(),
@@ -1012,7 +1063,70 @@ def plan_to_json(events: list[dict], plan: Plan, cfg: Config) -> dict:
         "slots": slots,
         "travel": travel,
         "weeks": weeks,
+        "boss": boss_blocks(plan, cfg),
     }
+
+
+BOSS_COLUMNS = ["Date", "Weekday", "Office start", "Work hours", "Exam"]
+_WEEKDAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def _half_hours(minutes: float) -> int:
+    """Round to the nearest half hour; exact halfway points go up."""
+    return int(minutes / 30 + 0.5) * 30
+
+
+def boss_blocks(plan: Plan, cfg: Config) -> dict:
+    """What the supervisor sees: the office blocks of planned days and the exam days.
+
+    Each block has its day, the rough start and the rounded length in minutes (both to the half hour).
+    A day with a timed blocker in `no_work_durations` is an exam day; its time is not shown.
+    """
+    exam_days = {d for d, _, _ in cfg.no_work_durations}
+    blocks: list[dict] = []
+    exams: list[str] = []
+    for week in plan.weeks:
+        for day in week.days:
+            if day.status == "outside":
+                continue
+            if day.day in exam_days:
+                exams.append(day.day.isoformat())
+            if day.status == "planned" and day.drawn is not None:
+                for arrive, leave in day.drawn.visits:
+                    # actual work time: the visit without the unpaid break
+                    blocks.append({"date": day.day.isoformat(), "start": hm(_half_hours(arrive)),
+                                   "minutes": _half_hours(leave - arrive - cfg.break_minutes)})
+    return {"blocks": blocks, "exams": exams}
+
+
+def boss_rows(plan: Plan, cfg: Config) -> list[list[str]]:
+    """The supervisor CSV rows: one row per office block, plus one row per exam day without work."""
+    info = boss_blocks(plan, cfg)
+    exams = set(info["exams"])
+    rows: list[list[str]] = []
+    for block in info["blocks"]:
+        day = date.fromisoformat(block["date"])
+        exam = "yes" if block["date"] in exams else ""
+        rows.append(_boss_base(day) + [block["start"], f"{block['minutes'] / 60:.1f}".replace(".", ","), exam])
+    with_work = {block["date"] for block in info["blocks"]}
+    for iso in info["exams"]:
+        if iso not in with_work:
+            rows.append(_boss_base(date.fromisoformat(iso)) + ["", "", "yes"])
+    rows.sort(key=lambda row: (row[0][6:], row[0][3:5], row[0][:2]))  # dd.mm.yyyy -> by date
+    return rows
+
+
+def _boss_base(day: date) -> list[str]:
+    return [day.strftime("%d.%m.%Y"), _WEEKDAY_SHORT[day.weekday()]]
+
+
+def write_boss_csv(plan: Plan, cfg: Config, path: Path) -> None:
+    """Semicolon-separated CSV with a byte-order mark, so Excel opens it with the columns split."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.writer(handle, delimiter=";")
+        writer.writerow(BOSS_COLUMNS)
+        writer.writerows(boss_rows(plan, cfg))
 
 
 def print_summary(events: list[dict], plan: Plan, cfg: Config) -> None:
@@ -1033,10 +1147,13 @@ def print_summary(events: list[dict], plan: Plan, cfg: Config) -> None:
             line += f"   (target {dur(week.target)}, deficit {dur(max(0, week.target - week.planned))})"
         print(line)
         for result in week.days:
+            if result.status == "outside":
+                continue
             day_label = f"  {SHORT_DAYS[result.day.weekday()]} {result.day:%d.%m.}"
             if result.status in ("planned", "fallback"):
                 option = result.drawn
-                visits = ", ".join(f"{hm(a)}-{hm(b)} ({dur(b - a)})" for a, b in option.visits)
+                visits = ", ".join(f"{hm(a)}-{hm(b)} ({dur(b - a - cfg.break_minutes)} work)"
+                                   for a, b in option.visits)
                 fuel = "" if option.fuel_eur is None else f", fuel ~{option.fuel_eur:.2f} EUR"
                 print(f"{day_label}  {result.status.upper():8} {visits}  by {option.modes}, "
                       f"travel {dur(option.travel)} (extra {dur(option.extra)}), cost {option.cost}{fuel}")
@@ -1057,6 +1174,16 @@ def main(argv: list[str] | None = None) -> int:
                         help="config file (default: config.toml; start from config.example.toml)")
     parser.add_argument("-o", "--output", type=Path, default=Path("data/plan.json"),
                         help="JSON file to write (default: data/plan.json)")
+    parser.add_argument("--compile", action="store_true",
+                        help="afterwards run 'typst compile calendar.typ plan.pdf' on the JSON")
+    parser.add_argument("--boss-csv", nargs="?", type=Path, const=Path("data/office-hours.csv"),
+                        metavar="PATH",
+                        help="also write a short CSV for your supervisor: office days, rough start, "
+                             "rounded hours and exam days (default path: data/office-hours.csv)")
+    parser.add_argument("--boss-pdf", nargs="?", type=Path, const=Path("data/office-hours.pdf"),
+                        metavar="PATH",
+                        help="also write a supervisor PDF: the monthly view with only the office "
+                             "times and exam days (default path: data/office-hours.pdf)")
     args = parser.parse_args(argv)
 
     try:
@@ -1097,7 +1224,54 @@ def main(argv: list[str] | None = None) -> int:
     args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
     print_summary(events, plan, config)
     print(f"\nwrote {args.output}")
+    if args.boss_csv:
+        write_boss_csv(plan, config, args.boss_csv)
+        print(f"wrote {args.boss_csv}")
+    if args.boss_pdf:
+        try:
+            pdf = compile_pdf(args.output, args.boss_pdf, extra_inputs={
+                "audience": "boss", "views": "month", "title": "Office hours"})
+        except (RuntimeError, ValueError) as exc:
+            parser.error(str(exc))
+        print(f"wrote {pdf}")
+    if args.compile:
+        try:
+            pdf = compile_pdf(args.output)
+        except (RuntimeError, ValueError) as exc:
+            parser.error(str(exc))
+        print(f"wrote {pdf}")
     return 0
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def compile_pdf(json_path: Path, pdf_path: Path | None = None,
+                extra_inputs: dict[str, str] | None = None) -> Path:
+    """Run Typst on calendar.typ with the given JSON and return the PDF path.
+
+    Typst only reads files inside the project root, so the JSON must be inside it.
+    `extra_inputs` are passed on as `--input key=value` (e.g. audience=boss).
+    """
+    typst = shutil.which("typst")
+    if typst is None:
+        raise RuntimeError("--compile needs the 'typst' command on the PATH "
+                           "(https://github.com/typst/typst#installation)")
+    try:
+        data = Path(os.path.relpath(json_path.resolve(), PROJECT_ROOT)).as_posix()
+    except ValueError:  # different drive on Windows
+        data = ""
+    if not data or data.startswith(".."):
+        raise ValueError(f"{json_path} must be inside the project folder for --compile")
+    pdf = (pdf_path or PROJECT_ROOT / "plan.pdf").resolve()
+    command = [typst, "compile", "calendar.typ", str(pdf), "--root", str(PROJECT_ROOT),
+               "--input", f"data={data}"]
+    for key, value in (extra_inputs or {}).items():
+        command += ["--input", f"{key}={value}"]
+    result = subprocess.run(command, cwd=PROJECT_ROOT, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"typst failed:\n{result.stderr.strip()}")
+    return pdf
 
 
 if __name__ == "__main__":
