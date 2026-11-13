@@ -1,0 +1,11 @@
+# Personal data: TUMonline exports, your config (home/commute data) and everything generated from them.
+# Never commit these. Only the fictional files in examples/ and config.example.toml are tracked.
+*.csv
+!examples/*.csv
+config.toml
+data/
+*.pdf
+*.png
+!examples/*.png
+
+__pycache__/
