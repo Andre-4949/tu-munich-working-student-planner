@@ -14,6 +14,18 @@ job_to_tum = 30         # job -> TUM. Default: same as tum_to_job
 home_to_job = 70        # home -> job directly, used before the first lecture. Default: home_to_tum + tum_to_job
 job_to_home = 70       # job -> home. Only used to draw the last travel block of a day. Default: home_to_job
 
+[car]
+# Optional: you have a car. Each car leg takes its own time (minutes). Remove this section
+# to plan with public transport only. The car starts at home each day; once you drive it out
+# it stays with you until you are home again.
+home_to_tum = 25        # required
+home_to_job = 45        # required
+tum_to_job = 45         # required
+# Optional, default: the same as the value in the other direction
+# job_to_tum = 45
+# job_to_home = 45
+# tum_to_home = 25
+
 [schedule]
 # Required:
 earliest_wake_up = "06:45"   # earliest time you get up on a work day
