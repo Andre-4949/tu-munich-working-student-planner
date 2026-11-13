@@ -34,7 +34,7 @@ min_time_at_company = 90     # shortest work block worth the trip (minutes)
 # Optional:
 ready_minutes = 30           # time between getting up and leaving home. Default: 0
 earliest_at_job = "08:00"    # office opens; no work before this. Default: no limit
-max_shift_minutes = 300      # longest single work block. Default: no limit
+max_shift_minutes = 600      # longest single work block. Default: no limit
 buffer_minutes = 10          # extra minutes kept free on each side of a work block that touches a lecture. Default: 0
 work_days = ["mon", "tue", "wed", "thu", "fri"]   # weekdays you can work. Default: Monday to Friday
 weekly_target_hours = 10     # hours the planner fills up to each week (the choice of days is optimised for it). Default: none
@@ -44,7 +44,7 @@ company_day_penalty_minutes = 60  # cost of one day at the company, in minutes o
 [lectures]
 # Sessions of these courses are ignored and do not block time.
 # LV_NUMMER as written in the TUMonline export (leading zeros are ignored).
-not_attended = ["0000000103"]
+not_attended = ["0000000001"]
 # Optional: skip only some session types of a course, as "LV_NUMMER:LV_ART".
 sessions_not_attended = []
 # Optional: true draws skipped sessions faded and hatched in the PDF, false hides them. Default: true
