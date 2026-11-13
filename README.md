@@ -213,13 +213,28 @@ Your export and your `config.toml` describe your personal timetable and commute.
 excludes all CSV files, `config.toml`, the `data/` folder and all PDF and PNG files, except the
 fictional files in `examples/`. Check with `git status --ignored` before you publish.
 
+## Code layout
+
+| Module | Job |
+| --- | --- |
+| `scripts/plan.py` | Command-line entry point (calls `planner/cli.py`) |
+| `planner/cli.py` | Options, reading the export and the config, writing the outputs |
+| `planner/tumonline.py`, `planner/events.py` | Reading the export; skipped sessions and lanes |
+| `planner/config.py`, `config_parse.py`, `errors.py` | `config.toml` as typed settings, with validation |
+| `planner/travel.py`, `timing.py` | Walks between places (car rules) and their clock times |
+| `planner/days.py`, `weekly.py`, `planning.py` | Options of a day, the weekly choice, the plan |
+| `planner/export.py`, `supervisor.py`, `summary.py`, `pdf.py` | JSON, supervisor CSV, terminal summary, Typst PDF |
+| `calendar.typ`, `lib.typ` | Typst template for the personal and supervisor PDFs |
+
 ## Tests
 
 ```sh
-python -I -m unittest discover -s tests -v
+python -I -m unittest -v
 ```
 
-The tests cover the walk rules for the car, the timing of visits (including shortening and minimum
+The tests live in `tests/`, one file per area (`test_walks.py`, `test_timing.py`, `test_days.py`,
+`test_weekly.py`, `test_config.py`, `test_supervisor.py`, `test_pdf.py`, `test_end_to_end.py`).
+They cover the walk rules for the car, the timing of visits (including shortening and minimum
 length), the baseline and extra travel, the weekly choice (target reached with the fewest company days,
 planned and fallback days never overlap, the maximum is never exceeded), the config validation, the lane
-layout and an end-to-end run.
+layout, the supervisor output and an end-to-end run.
