@@ -24,7 +24,7 @@ CAR_OUT = "out"
 def make_config(schedule=None, travel=None, car=None, lectures=None, holidays=None,
                 day_overrides=None, calendar=None):
     """Config with the test values: transit home->TUM 40, TUM->job 30, job->TUM 30, home->job 70,
-    job->home 70; wake 06:30; latest 17:00; minimum 60 minutes; no buffer; penalty 60."""
+    job->home 70; wake 06:30; latest 17:00; minimum 60 minutes; no buffer."""
     raw = {
         "travel": {"home_to_tum": 40, "tum_to_job": 30, **(travel or {})},
         "schedule": {"earliest_wake_up": "06:30", "latest_at_job": "17:00",
@@ -220,7 +220,7 @@ class DayCandidateTests(unittest.TestCase):
         self.assertEqual(cand.baseline.extra, 0)
         for option in cand.visits:
             self.assertGreaterEqual(option.extra, 0)
-            self.assertEqual(option.penalty, cfg.company_day_penalty)
+            self.assertEqual(option.cost, option.extra)  # no flat penalty: cost is the day's extra travel
 
     def test_split_day_with_car_starts_with_work_from_home(self):
         cfg = make_config(car=CAR_TABLE)
@@ -249,7 +249,7 @@ class SelectWeekTests(unittest.TestCase):
 
     def test_target_is_reached_with_the_fewest_company_days(self):
         # Five free days: one day of 9h20 is not enough for 10h, so two days of 5h each are
-        # planned (cost 2 x penalty) instead of three (3 x penalty).
+        # planned (two days of travel) instead of three (three days of travel).
         cfg = make_config(schedule={"weekly_target_hours": 10, "min_time_at_company": 120})
         cands = [day_candidates(MONDAY.replace(day=7 + i), [], cfg) for i in range(5)]
         chosen = select_week(cands, 600, 600, 120)
@@ -288,13 +288,28 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual((cfg.job_to_tum, cfg.home_to_job, cfg.job_to_home), (30, 70, 70))
         self.assertEqual(cfg.work_days, frozenset(range(5)))
         self.assertIsNone(cfg.car)
-        self.assertEqual(cfg.company_day_penalty, 60)
+        self.assertIsNone(cfg.car)
         self.assertIsNone(cfg.weekly_target_minutes)
 
     def test_car_defaults_are_symmetric(self):
         cfg = make_config(car=CAR_TABLE)
         self.assertEqual((cfg.car.job_to_tum, cfg.car.job_to_home, cfg.car.tum_to_home),
                          (45, 45, 25))
+
+    def test_fuel_estimate_counts_car_legs(self):
+        cfg = make_config(car={**CAR_TABLE, "distance_in_km": 20, "liters_per_100km": 7,
+                               "fuel_price_per_liter": 1.8})
+        best = min(day_candidates(MONDAY, [], cfg).visits, key=lambda o: o.travel)
+        # car home -> job and back: two car legs of 20 km each at 7 l/100 km and 1.80 EUR/l
+        self.assertEqual(best.fuel_eur, round(2 * 20 * 7 / 100 * 1.8, 2))
+
+    def test_no_fuel_estimate_without_car_distance(self):
+        cfg = make_config(car=CAR_TABLE)
+        self.assertTrue(all(o.fuel_eur is None for o in day_candidates(MONDAY, [], cfg).visits))
+
+    def test_fuel_estimate_needs_all_three_values(self):
+        with self.assertRaisesRegex(ConfigError, "fuel"):
+            make_config(car={**CAR_TABLE, "distance_in_km": 20})
 
     def test_car_requires_its_times(self):
         with self.assertRaisesRegex(ConfigError, "car.home_to_job"):

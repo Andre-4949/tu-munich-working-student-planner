@@ -21,6 +21,10 @@ job_to_home = 70       # job -> home. Only used to draw the last travel block of
 home_to_tum = 25        # required
 home_to_job = 45        # required
 tum_to_job = 45         # required
+# Optional: fuel estimate per car day. Give all three or none.
+distance_in_km = 20          # one-way driving distance of every car leg, km
+liters_per_100km = 7.0       # fuel consumption of your car
+fuel_price_per_liter = 1.80  # EUR per liter
 # Optional, default: the same as the value in the other direction
 # job_to_tum = 45
 # job_to_home = 45
@@ -39,7 +43,6 @@ buffer_minutes = 10          # extra minutes kept free on each side of a work bl
 work_days = ["mon", "tue", "wed", "thu", "fri"]   # weekdays you can work. Default: Monday to Friday
 weekly_target_hours = 10     # hours the planner fills up to each week (the choice of days is optimised for it). Default: none
 max_hours_per_week = 10     # legal or personal maximum; never planned above it. Default: the weekly target
-company_day_penalty_minutes = 60  # cost of one day at the company, in minutes of extra travel. Default: 60
 
 [lectures]
 # Sessions of these courses are ignored and do not block time.

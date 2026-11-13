@@ -21,7 +21,7 @@ Model
     stays with you until you are home again, so transit is not possible while the car is out.
     Between two lectures you may make at most one visit to the job. Each day gets its
     cheapest option; the cost is the extra travel compared with the cheapest commute without
-    work, plus a penalty per company day. For the week, a small dynamic programme picks one
+    work. For the week, a small dynamic programme picks one
     option per day so that the target hours are reached at the lowest total cost.
 """
 
@@ -223,10 +223,12 @@ class ConfigError(ValueError):
 _MISSING = object()
 _TOP_LEVEL = {"travel", "car", "schedule", "lectures", "holidays", "calendar", "day_overrides"}
 _TRAVEL = {"home_to_tum", "tum_to_job", "job_to_tum", "home_to_job", "job_to_home"}
-_CAR = {"home_to_tum", "home_to_job", "tum_to_job", "job_to_tum", "job_to_home", "tum_to_home"}
+_CAR = {"home_to_tum", "home_to_job", "tum_to_job", "job_to_tum", "job_to_home", "tum_to_home",
+        "distance_in_km", "liters_per_100km", "fuel_price_per_liter"}
+_FUEL_KEYS = ("distance_in_km", "liters_per_100km", "fuel_price_per_liter")
 _SCHEDULE = {"earliest_wake_up", "ready_minutes", "latest_at_job", "earliest_at_job",
              "min_time_at_company", "max_shift_minutes", "buffer_minutes", "work_days",
-             "weekly_target_hours", "max_hours_per_week", "company_day_penalty_minutes"}
+             "weekly_target_hours", "max_hours_per_week"}
 _LECTURES = {"not_attended", "sessions_not_attended", "show_skipped"}
 _HOLIDAYS = {"no_work", "company_closed"}
 _CALENDAR = {"start", "end"}
@@ -241,6 +243,10 @@ class CarConfig:
     job_to_tum: int
     job_to_home: int
     tum_to_home: int
+    # fuel estimate: every car leg drives distance_km; all three are needed, or none
+    distance_km: float | None = None
+    liters_per_100km: float | None = None
+    fuel_price: float | None = None
 
 
 @dataclass(frozen=True)
@@ -263,7 +269,6 @@ class Config:
     work_days: frozenset[int]      # date.weekday() values, 0 = Monday
     weekly_target_minutes: int | None
     max_week_minutes: int | None   # never plan more than this per week (defaults to the target)
-    company_day_penalty: int       # cost of one day at the company, in minutes of travel
     # lectures
     not_attended: frozenset[str]                       # normalized LV numbers
     sessions_not_attended: frozenset[tuple[str, str]]  # (normalized LV number, LV_ART)
@@ -302,6 +307,12 @@ def _parse_minutes(value, name: str, minimum: int = 0) -> int:
     if value < minimum:
         raise ConfigError(f"{name}: must be at least {minimum}, got {value}")
     return value
+
+
+def _parse_positive(value, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        raise ConfigError(f"{name}: expected a positive number, got {value!r}")
+    return float(value)
 
 
 def _parse_clock(value, name: str) -> int:
@@ -383,6 +394,10 @@ def config_from_dict(raw: dict) -> Config:
         c_home_to_tum = _get(table, "car", "home_to_tum", _parse_minutes)
         c_home_to_job = _get(table, "car", "home_to_job", _parse_minutes)
         c_tum_to_job = _get(table, "car", "tum_to_job", _parse_minutes)
+        fuel_given = [key for key in _FUEL_KEYS if key in table]
+        if fuel_given and len(fuel_given) != len(_FUEL_KEYS):
+            raise ConfigError("[car]: the fuel estimate needs all of distance_in_km, "
+                              "liters_per_100km and fuel_price_per_liter (or none of them)")
         car = CarConfig(
             home_to_tum=c_home_to_tum,
             home_to_job=c_home_to_job,
@@ -390,6 +405,9 @@ def config_from_dict(raw: dict) -> Config:
             job_to_tum=_get(table, "car", "job_to_tum", _parse_minutes, c_tum_to_job),
             job_to_home=_get(table, "car", "job_to_home", _parse_minutes, c_home_to_job),
             tum_to_home=_get(table, "car", "tum_to_home", _parse_minutes, c_home_to_tum),
+            distance_km=_get(table, "car", "distance_in_km", _parse_positive, None),
+            liters_per_100km=_get(table, "car", "liters_per_100km", _parse_positive, None),
+            fuel_price=_get(table, "car", "fuel_price_per_liter", _parse_positive, None),
         )
 
     schedule = _table(raw, "schedule", _SCHEDULE)
@@ -403,7 +421,6 @@ def config_from_dict(raw: dict) -> Config:
     work_days = _get(schedule, "schedule", "work_days", _parse_weekdays, frozenset(range(5)))
     target = _get(schedule, "schedule", "weekly_target_hours", _parse_hours, None)
     max_week = _get(schedule, "schedule", "max_hours_per_week", _parse_hours, None)
-    penalty = _get(schedule, "schedule", "company_day_penalty_minutes", _parse_minutes, 60)
     if max_week is None:
         max_week = target
     if target is not None and max_week is not None and max_week < target:
@@ -462,7 +479,6 @@ def config_from_dict(raw: dict) -> Config:
         min_time_at_company=min_time, max_shift_minutes=max_shift,
         buffer_minutes=buffer_minutes, work_days=work_days,
         weekly_target_minutes=target, max_week_minutes=max_week,
-        company_day_penalty=penalty,
         not_attended=frozenset(normalize_lv(n) for n in not_attended if normalize_lv(n)),
         sessions_not_attended=frozenset(sessions),
         show_skipped=show_skipped,
@@ -490,6 +506,9 @@ def config_for_output(cfg: Config) -> dict:
             "home_to_tum": cfg.car.home_to_tum, "home_to_job": cfg.car.home_to_job,
             "tum_to_job": cfg.car.tum_to_job, "job_to_tum": cfg.car.job_to_tum,
             "job_to_home": cfg.car.job_to_home, "tum_to_home": cfg.car.tum_to_home,
+            "distance_in_km": cfg.car.distance_km,
+            "liters_per_100km": cfg.car.liters_per_100km,
+            "fuel_price_per_liter": cfg.car.fuel_price,
         },
         "earliest_wake_up": hm(cfg.earliest_wake_up),
         "ready_minutes": cfg.ready_minutes,
@@ -501,7 +520,6 @@ def config_for_output(cfg: Config) -> dict:
         "work_days": sorted(day + 1 for day in cfg.work_days),  # ISO: 1 = Monday
         "weekly_target_minutes": cfg.weekly_target_minutes,
         "max_week_minutes": cfg.max_week_minutes,
-        "company_day_penalty": cfg.company_day_penalty,
         "not_attended": sorted(cfg.not_attended),
         "sessions_not_attended": sorted(f"{n}:{k}" for n, k in cfg.sessions_not_attended),
         "show_skipped": cfg.show_skipped,
@@ -664,11 +682,20 @@ class Option:
         self.travel = sum(leg.minutes for leg in self.legs)
         self.work = sum(leave - arrive for arrive, leave in self.visits)
         self.extra = 0                # travel above the cheapest commute without work
-        self.penalty = cfg.company_day_penalty if self.visits else 0
 
     @property
     def cost(self) -> int:
-        return self.extra + self.penalty
+        """Extra travel of the day, in minutes. A visit adds its trips, so visit days cost more."""
+        return self.extra
+
+    @property
+    def fuel_eur(self) -> float | None:
+        """Estimated fuel for the car legs of this option; None without a fuel estimate."""
+        car = self.cfg.car
+        if car is None or car.distance_km is None:
+            return None
+        car_legs = sum(1 for leg in self.legs if leg.mode == CAR)
+        return round(car_legs * car.distance_km * car.liters_per_100km / 100 * car.fuel_price, 2)
 
     @property
     def value(self) -> float:
@@ -688,7 +715,7 @@ class Option:
         gaps[index] = schedule_gap(self.day, spec, legs, self.cfg, self.opening, self.latest,
                                    visit_len=minutes)
         result = Option(self.day, self.cfg, self.opening, self.latest, self.inputs, tuple(gaps))
-        result.extra, result.penalty = self.extra, self.penalty
+        result.extra = self.extra
         return result
 
 
@@ -920,13 +947,21 @@ def _option_json(option: Option | None) -> dict | None:
         "work_minutes": option.work,
         "travel_minutes": option.travel,
         "extra_minutes": option.extra,
-        "penalty_minutes": option.penalty,
+        "fuel_eur": option.fuel_eur,
         "cost": option.cost,
         "cost_per_hour": None if not option.work else round(option.value, 1),
         "modes": option.modes,
         "visits": [{"start": hm(a), "end": hm(b), "start_min": a, "end_min": b,
                     "minutes": b - a} for a, b in option.visits],
     }
+
+
+def _week_fuel(week: WeekResult) -> float | None:
+    """Estimated fuel of the planned and fallback days of a week; None without a fuel estimate."""
+    fuel = [d.drawn.fuel_eur for d in week.days
+            if d.drawn is not None and d.status in ("planned", "fallback")
+            and d.drawn.fuel_eur is not None]
+    return round(sum(fuel), 2) if fuel else None
 
 
 def plan_to_json(events: list[dict], plan: Plan, cfg: Config) -> dict:
@@ -967,6 +1002,7 @@ def plan_to_json(events: list[dict], plan: Plan, cfg: Config) -> dict:
             "maximum_minutes": week.maximum,
             "travel_minutes": sum(d.drawn.travel for d in week.days
                                   if d.drawn is not None and d.status in ("planned", "fallback")),
+            "fuel_eur": _week_fuel(week),
         })
     return {
         "config": config_for_output(cfg),
@@ -1001,8 +1037,9 @@ def print_summary(events: list[dict], plan: Plan, cfg: Config) -> None:
             if result.status in ("planned", "fallback"):
                 option = result.drawn
                 visits = ", ".join(f"{hm(a)}-{hm(b)} ({dur(b - a)})" for a, b in option.visits)
+                fuel = "" if option.fuel_eur is None else f", fuel ~{option.fuel_eur:.2f} EUR"
                 print(f"{day_label}  {result.status.upper():8} {visits}  by {option.modes}, "
-                      f"travel {dur(option.travel)} (extra {dur(option.extra)}), cost {option.cost}")
+                      f"travel {dur(option.travel)} (extra {dur(option.extra)}), cost {option.cost}{fuel}")
             elif result.best is not None:
                 b = result.best
                 print(f"{day_label}  available  best {dur(b.work)} by {b.modes}, "
