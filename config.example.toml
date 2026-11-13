@@ -37,7 +37,9 @@ earliest_at_job = "08:00"    # office opens; no work before this. Default: no li
 max_shift_minutes = 300      # longest single work block. Default: no limit
 buffer_minutes = 10          # extra minutes kept free on each side of a work block that touches a lecture. Default: 0
 work_days = ["mon", "tue", "wed", "thu", "fri"]   # weekdays you can work. Default: Monday to Friday
-weekly_target_hours = 10     # your planned hours per week; the overview shows surplus/deficit. Default: none
+weekly_target_hours = 10     # hours the planner fills up to each week (the choice of days is optimised for it). Default: none
+max_hours_per_week = 10     # legal or personal maximum; never planned above it. Default: the weekly target
+company_day_penalty_minutes = 60  # cost of one day at the company, in minutes of extra travel. Default: 60
 
 [lectures]
 # Sessions of these courses are ignored and do not block time.
@@ -51,8 +53,15 @@ show_skipped = true
 [holidays]
 # Optional: dates or ranges (inclusive) without work, e.g. holidays or a vacation.
 no_work = ["2026-11-10"]
+# Optional: dates or ranges when the company is closed. Lectures still happen; no work is planned.
+company_closed = ["2026-12-24..2027-01-01"]
 
 # Optional: change the values for one weekday only.
 # Table names: mon, tue, wed, thu, fri, sat, sun
+# Optional: first and last day of the planned calendar. Default: the first and last session of the export.
+# [calendar]
+# start = "2026-11-02"
+# end = "2026-11-20"
+
 [day_overrides.fri]
 latest_at_job = "14:00"
