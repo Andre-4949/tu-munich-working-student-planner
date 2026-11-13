@@ -1,6 +1,6 @@
-// Planner template: lectures, travel and possible work slots.
+// Planner template: lectures, travel (car or transit) and the planned work visits.
 // Input: the JSON written by scripts/plan.py (see README). Typst only draws;
-// all the interval maths happens in Python.
+// all the planning happens in Python.
 
 // ---------------------------------------------------------------- labels ---
 
@@ -14,28 +14,32 @@
     overview: "Overview",
     settings: "Settings used",
     courses: "Courses",
-    hours: "Possible work per week",
+    hours: "Work hours per week",
     course: "Course", kind: "Type", group: "Group", times: "Times", room: "Room",
     sessions: "Sessions", period: "Period",
-    lectures: "Lectures", possible: "Possible work", target: "Target", delta: "vs. target",
-    work: "Work", skipped: "skipped", nothing: "none", every-day: "every day",
+    lectures: "Lectures", planned: "Planned", fallback: "Fallback", target: "Target",
+    delta: "vs. target", travel: "Travel", extra: "extra", possible: "possible",
+    work: "Work", skipped: "skipped", nothing: "none", no-work: "no work", commute: "commute",
     default-group: "Standardgruppe",
     types: (VO: "Lecture", UE: "Exercise", VU: "Lecture + Exercise",
       VI: "Lecture + Exercise", PR: "Lab", SE: "Seminar", PS: "Proseminar",
       KO: "Colloquium", RE: "Revision course"),
-    travel: (
-      home-to-tum: "Home → TUM", tum-to-job: "TUM → job", job-to-tum: "job → TUM",
-      home-to-job: "Home → job", job-to-home: "job → home", tum-to-home: "TUM → home",
-    ),
+    // leg labels: from-to, H = home, T = TUM, J = job
+    legs: ("HT": "Home → TUM", "TH": "TUM → home", "TJ": "TUM → job", "JT": "Job → TUM",
+      "HJ": "Home → job", "JH": "Job → home"),
+    modes: (car: "car", transit: "transit", mixed: "mixed", nothing: ""),
     cfg: (
-      home-to-tum: "Home → TUM", tum-to-job: "TUM → job", job-to-tum: "Job → TUM",
-      home-to-job: "Home → job (first morning)", job-to-home: "Job → home",
-      wake: "Earliest wake-up", ready: "Ready after wake-up", latest: "Latest at job",
-      earliest-job: "Earliest at job", min-block: "Shortest work block",
-      max-block: "Longest work block", buffer: "Buffer next to lectures",
-      work-days: "Work days", target: "Weekly target", not-attended: "Courses not attended",
-      sessions: "Sessions not attended", show-skipped: "Skipped sessions in PDF",
-      no-work: "No-work dates", overrides: "Day overrides",
+      home-to-tum: "Home → TUM (transit)", tum-to-job: "TUM → job (transit)",
+      job-to-tum: "Job → TUM (transit)", home-to-job: "Home → job (transit)",
+      job-to-home: "Job → home (transit)",
+      car: "Car times", wake: "Earliest wake-up", ready: "Ready after wake-up",
+      latest: "Latest at job", earliest-job: "Earliest at job",
+      min-block: "Shortest work block", max-block: "Longest work block",
+      buffer: "Buffer next to lectures", work-days: "Work days",
+      target: "Weekly target", maximum: "Weekly maximum", penalty: "Penalty per company day",
+      not-attended: "Courses not attended", sessions: "Sessions not attended",
+      show-skipped: "Skipped sessions in PDF", no-work: "Closed / no work",
+      overrides: "Day overrides", calendar: "Calendar range",
     ),
     yes: "shown", hidden: "hidden",
     generated: "Generated from a TUMonline export on",
@@ -49,29 +53,32 @@
     overview: "Übersicht",
     settings: "Verwendete Einstellungen",
     courses: "Lehrveranstaltungen",
-    hours: "Mögliche Arbeitszeit pro Woche",
+    hours: "Arbeitsstunden pro Woche",
     course: "Lehrveranstaltung", kind: "Art", group: "Gruppe", times: "Zeiten", room: "Raum",
     sessions: "Termine", period: "Zeitraum",
-    lectures: "Vorlesungen", possible: "Mögliche Arbeit", target: "Ziel", delta: "vs. Ziel",
-    work: "Arbeit", skipped: "übersprungen", nothing: "keine", every-day: "jeden Tag",
+    lectures: "Vorlesungen", planned: "Geplant", fallback: "Ersatz", target: "Ziel",
+    delta: "vs. Ziel", travel: "Fahrt", extra: "zusätzlich", possible: "möglich",
+    work: "Arbeit", skipped: "übersprungen", nothing: "keine", no-work: "keine Arbeit",
+    commute: "Anfahrt",
     default-group: "Standardgruppe",
     types: (VO: "Vorlesung", UE: "Übung", VU: "Vorlesung + Übung",
       VI: "Vorlesung + Übung", PR: "Praktikum", SE: "Seminar", PS: "Proseminar",
       KO: "Kolloquium", RE: "Repetitorium"),
-    travel: (
-      home-to-tum: "Zuhause → TUM", tum-to-job: "TUM → Job", job-to-tum: "Job → TUM",
-      home-to-job: "Zuhause → Job", job-to-home: "Job → Zuhause", tum-to-home: "TUM → Zuhause",
-    ),
+    legs: ("HT": "Zuhause → TUM", "TH": "TUM → Zuhause", "TJ": "TUM → Job", "JT": "Job → TUM",
+      "HJ": "Zuhause → Job", "JH": "Job → Zuhause"),
+    modes: (car: "Auto", transit: "ÖPNV", mixed: "gemischt", nothing: ""),
     cfg: (
-      home-to-tum: "Zuhause → TUM", tum-to-job: "TUM → Job", job-to-tum: "Job → TUM",
-      home-to-job: "Zuhause → Job (erster Morgen)", job-to-home: "Job → Zuhause",
-      wake: "Frühestes Aufstehen", ready: "Fertig machen nach dem Aufstehen",
+      home-to-tum: "Zuhause → TUM (ÖPNV)", tum-to-job: "TUM → Job (ÖPNV)",
+      job-to-tum: "Job → TUM (ÖPNV)", home-to-job: "Zuhause → Job (ÖPNV)",
+      job-to-home: "Job → Zuhause (ÖPNV)",
+      car: "Auto-Fahrzeiten", wake: "Frühestes Aufstehen", ready: "Fertig machen nach dem Aufstehen",
       latest: "Spätestens im Job", earliest-job: "Frühestens im Job",
       min-block: "Kürzester Arbeitsblock", max-block: "Längster Arbeitsblock",
       buffer: "Puffer neben Vorlesungen", work-days: "Arbeitstage",
-      target: "Wochenziel", not-attended: "Nicht besuchte Veranstaltungen",
-      sessions: "Nicht besuchte Termine", show-skipped: "Übersprungene im PDF",
-      no-work: "Tage ohne Arbeit", overrides: "Tages-Ausnahmen",
+      target: "Wochenziel", maximum: "Wochenmaximum", penalty: "Strafe pro Firmentag",
+      not-attended: "Nicht besuchte Veranstaltungen", sessions: "Nicht besuchte Termine",
+      show-skipped: "Übersprungene im PDF", no-work: "Geschlossen / keine Arbeit",
+      overrides: "Tages-Ausnahmen", calendar: "Kalenderzeitraum",
     ),
     yes: "angezeigt", hidden: "ausgeblendet",
     generated: "Erstellt aus einem TUMonline-Export am",
@@ -93,13 +100,17 @@
   (fill: rgb("#e3eecb"), line: rgb("#6f9a1c")),
 )
 
-// Work slots are the colour of the planner: green with a strong outline.
-#let work-fill = rgb("#c9f2d6")
-#let work-day-fill = rgb("#f1fbf4")
-#let work-line = rgb("#16833f")
-#let work-ink = rgb("#0c5a2a")
-// Travel is neutral grey.
+// Planned work: strong green. Fallback: a lighter green tone. Both are work, not travel.
+#let planned-fill = rgb("#c9f2d6")
+#let planned-line = rgb("#16833f")
+#let planned-ink = rgb("#0c5a2a")
+#let planned-day = rgb("#f1fbf4")
+#let fallback-fill = rgb("#eefaf2")
+#let fallback-line = rgb("#8fd1a7")
+#let fallback-ink = rgb("#3f7d58")
+// Travel: neutral grey. A car leg is solid, a transit leg dotted.
 #let travel-fill = luma(236)
+#let car-fill = luma(222)
 #let travel-line = luma(150)
 #let travel-ink = luma(85)
 // Skipped sessions: hatched and faded.
@@ -156,7 +167,7 @@
   } else { ev.room }
 }
 
-// Group items (events, slots, legs) by their ISO date.
+// Group items (events, slots, legs, days) by their ISO date.
 #let index-by-date(items) = {
   let out = (:)
   for it in items {
@@ -165,13 +176,11 @@
   out
 }
 
-// Chip with the work slot, used in the month view.
-#let work-chip(s, t) = block(
-  width: 100%, above: 0pt, below: 1.5pt,
-  fill: work-fill, stroke: (left: 2pt + work-line),
-  inset: (x: 2.5pt, y: 1.5pt),
-  text(size: 6.8pt, fill: work-ink)[*#t.work #s.start–#s.end* #dur(s.minutes)],
-)
+// "car · Home → TUM" for a travel block
+#let leg-text(leg, t) = t.legs.at(leg.src + leg.dst, default: "") + " · " + t.modes.at(leg.mode)
+
+// The evaluation line of a day: what it would cost in travel
+#let day-eval(option, t) = [#t.travel #dur(option.travel_minutes) (#t.extra #dur(option.extra_minutes)), #t.modes.at(option.modes, default: option.modes)]
 
 // ---------------------------------------------------------------- views ---
 
@@ -185,6 +194,11 @@
     (t.cfg.job-to-tum, [#cfg.job_to_tum min]),
     (t.cfg.home-to-job, [#cfg.home_to_job min]),
     (t.cfg.job-to-home, [#cfg.job_to_home min]),
+  )
+  if cfg.car != none {
+    cfg-rows.push((t.cfg.car, [#cfg.car.home_to_tum / #cfg.car.home_to_job / #cfg.car.tum_to_job min]))
+  }
+  cfg-rows += (
     (t.cfg.wake, [#cfg.earliest_wake_up]),
     (t.cfg.ready, [#cfg.ready_minutes min]),
     (t.cfg.latest, [#cfg.latest_at_job]),
@@ -195,6 +209,8 @@
     (t.cfg.work-days, t.days-short.enumerate()
       .filter(p => (p.at(0) + 1) in cfg.work_days).map(p => p.at(1)).join(", ")),
     (t.cfg.target, if cfg.weekly_target_minutes == none [#t.nothing] else [#dur(cfg.weekly_target_minutes)]),
+    (t.cfg.maximum, if cfg.max_week_minutes == none [#t.nothing] else [#dur(cfg.max_week_minutes)]),
+    (t.cfg.penalty, [#cfg.company_day_penalty min]),
     (t.cfg.not-attended, if cfg.not_attended.len() == 0 [#t.nothing] else [#cfg.not_attended.join(", ")]),
     (t.cfg.sessions, if cfg.sessions_not_attended.len() == 0 [#t.nothing] else [#cfg.sessions_not_attended.join(", ")]),
     (t.cfg.show-skipped, if cfg.show_skipped [#t.yes] else [#t.hidden]),
@@ -221,8 +237,8 @@
       #text(size: 10pt, weight: "bold")[#t.settings]
       #v(0.15cm)
       #table(
-        columns: (4.4cm, 1fr),
-        inset: (x: 4pt, y: 2.6pt),
+        columns: (4.6cm, 1fr),
+        inset: (x: 4pt, y: 2.2pt),
         stroke: (x: none, y: 0.4pt + luma(220)),
         ..cfg-rows.map(r => (text(fill: luma(90))[#r.at(0)], r.at(1))).flatten(),
       )
@@ -231,29 +247,31 @@
       #text(size: 10pt, weight: "bold")[#t.hours]
       #v(0.15cm)
       #let weeks = plan.weeks
-      #let scale = calc.max(60, ..weeks.map(w => calc.max(w.work_minutes, w.lecture_minutes)))
+      #let scale = calc.max(60, ..weeks.map(w => calc.max(w.planned_minutes + w.fallback_minutes, w.lecture_minutes)))
       #table(
-        columns: (1.3cm, 4.6cm, 2.2cm, 2.4cm, 2.4cm, 1fr),
-        inset: (x: 4pt, y: 2.6pt),
+        columns: (1.3cm, 4.2cm, 1.9cm, 1.9cm, 1.9cm, 2.1cm, 1fr),
+        inset: (x: 4pt, y: 2.2pt),
         stroke: (x: none, y: 0.4pt + luma(220)),
         align: (left + horizon, left + horizon, right + horizon, right + horizon,
-          right + horizon, left + horizon),
+          right + horizon, right + horizon, left + horizon),
         table.header(
-          [*#t.week*], [], [*#t.lectures*], [*#t.possible*], [*#t.delta*], [],
+          [*#t.week*], [], [*#t.lectures*], [*#t.planned*], [*#t.fallback*], [*#t.delta*], [],
         ),
         ..weeks.map(w => {
           let monday = parse-date(w.monday)
           let sunday = add-days(monday, 6)
-          let delta = if w.target_minutes == none { none } else { w.work_minutes - w.target_minutes }
+          let delta = if w.target_minutes == none { none } else { w.planned_minutes - w.target_minutes }
           (
             [#t.wk #w.week],
             [#fmt-date-short(monday, t) – #fmt-date-short(sunday, t)#sunday.year()],
             [#dur(w.lecture_minutes)],
-            text(weight: "bold", fill: work-ink)[#dur(w.work_minutes)],
+            text(weight: "bold", fill: planned-ink)[#dur(w.planned_minutes)],
+            text(fill: fallback-ink)[#dur(w.fallback_minutes)],
             if delta == none [–] else [#signed-dur(delta)],
             stack(dir: ttb, spacing: 1pt,
               rect(width: 3.2cm * (w.lecture_minutes / scale), height: 0.12cm, fill: luma(200), stroke: none),
-              rect(width: 3.2cm * (w.work_minutes / scale), height: 0.18cm, fill: work-line, stroke: none),
+              rect(width: 3.2cm * (w.planned_minutes / scale), height: 0.16cm, fill: planned-line, stroke: none),
+              rect(width: 3.2cm * (w.fallback_minutes / scale), height: 0.10cm, fill: fallback-line, stroke: none),
             ),
           )
         }).flatten(),
@@ -311,8 +329,23 @@
   )
 }
 
-// Month grid: lectures, possible work and the hours per day.
-#let month-page(year, month, by-date, days, t, title) = {
+// Work chip in the month view.
+#let work-chip(s, t) = {
+  let (fill, line, ink) = if s.status == "planned" {
+    (planned-fill, planned-line, planned-ink)
+  } else {
+    (fallback-fill, fallback-line, fallback-ink)
+  }
+  block(
+    width: 100%, above: 0pt, below: 1.5pt,
+    fill: fill, stroke: (left: 2pt + line),
+    inset: (x: 2.5pt, y: 1.5pt),
+    text(size: 6.8pt, fill: ink)[*#t.work #s.start–#s.end* #dur(s.minutes)],
+  )
+}
+
+// Month grid: lectures, planned work and the hours per day.
+#let month-page(year, month, by-date, days-info, days, t, title) = {
   let first = datetime(year: year, month: month, day: 1)
   let next-first = if month == 12 { datetime(year: year + 1, month: 1, day: 1) } else {
     datetime(year: year, month: month + 1, day: 1)
@@ -349,16 +382,22 @@
             let d = add-days(monday, wd - 1)
             let in-month = d.month() == month
             let items = if in-month { by-date.at(iso(d), default: ()) } else { () }
-            let work = items.filter(it => it.kind == "work").map(it => it.minutes).sum(default: 0)
+            let info = days-info.at(iso(d), default: none)
+            let planned = if info != none and info.status == "planned" { info.work_minutes } else { 0 }
+            let fallback = if info != none and info.status == "fallback" { info.work_minutes } else { 0 }
             grid.cell(
               inset: 3pt,
-              fill: if not in-month { luma(248) } else if work > 0 { work-day-fill } else { white },
+              fill: if not in-month { luma(248) } else if planned > 0 { planned-day } else { white },
               block(width: 100%, height: 100%, clip: true, {
                 if in-month {
                   grid(
                     columns: (1fr, auto),
                     text(size: 9pt, weight: "bold", fill: luma(90))[#d.day()],
-                    if work > 0 { text(size: 8pt, weight: "bold", fill: work-ink)[#dur(work)] },
+                    if planned > 0 {
+                      text(size: 8pt, weight: "bold", fill: planned-ink)[#dur(planned)]
+                    } else if fallback > 0 {
+                      text(size: 8pt, fill: fallback-ink)[#dur(fallback) #t.fallback]
+                    },
                   )
                   v(1pt)
                   for it in items.sorted(key: it => it.start_min) {
@@ -387,12 +426,11 @@
   }))
 }
 
-// One week as a time grid: lectures, travel and possible work.
-#let week-page(week, events, slots, legs, days, hours, color-of, t, title) = {
+// One week as a time grid: lectures, travel and work.
+#let week-page(week, events, slots, legs, days-info, days, hours, color-of, t, title) = {
   let (start-h, end-h) = hours
   let n-hours = end-h - start-h
   let monday = parse-date(week.monday)
-  let work = week.work_minutes
   let target = week.target_minutes
 
   [
@@ -402,16 +440,19 @@
       #fmt-date(monday, t) – #fmt-date-long(add-days(monday, days.last() - 1), t)
     ]
     #h(1fr)
-    #text(size: 10pt, weight: "bold", fill: work-ink)[#t.possible: #dur(work)]
+    #text(size: 10pt, weight: "bold", fill: planned-ink)[#t.planned: #dur(week.planned_minutes)]
+    #if week.fallback_minutes > 0 [
+      #text(size: 9pt, fill: fallback-ink)[ · #t.fallback #dur(week.fallback_minutes)]
+    ]
     #if target != none [
-      #text(size: 9pt, fill: luma(110))[ (#t.target #dur(target), #t.delta #signed-dur(work - target))]
+      #text(size: 9pt, fill: luma(110))[ (#t.target #dur(target), #t.delta #signed-dur(week.planned_minutes - target))]
     ]
   ]
   v(0.2cm)
 
   block(width: 100%, height: 1fr, layout(size => {
     let time-w = 1.1cm
-    let head-h = 0.9cm
+    let head-h = 1.25cm
     let col-w = (size.width - time-w) / days.len()
     let hour-h = calc.min(1.7cm, (size.height - head-h - 0.1cm) / n-hours)
     let grid-h = hour-h * n-hours
@@ -421,15 +462,30 @@
     let by-day-legs = index-by-date(legs)
 
     block(width: 100%, height: head-h + grid-h, {
-      // day headers with the possible work per day
+      // day headers: date, planned or fallback work, and the travel of the plan
       for (i, wd) in days.enumerate() {
         let d = add-days(monday, wd - 1)
-        let day-work = by-day-slots.at(iso(d), default: ()).map(s => s.minutes).sum(default: 0)
+        let info = days-info.at(iso(d), default: none)
+        let line = if info == none {
+          none
+        } else if info.status == "planned" {
+          text(size: 8pt, weight: "bold", fill: planned-ink)[#t.planned #dur(info.work_minutes)]
+        } else if info.status == "fallback" {
+          text(size: 8pt, weight: "bold", fill: fallback-ink)[#t.fallback #dur(info.work_minutes)]
+        } else if info.best != none {
+          text(size: 7.5pt, fill: luma(110))[#t.possible #dur(info.best.work_minutes)]
+        } else {
+          text(size: 7.5pt, fill: luma(110))[#t.no-work]
+        }
         place(top + left, dx: time-w + i * col-w,
           box(width: col-w, height: head-h, align(center + horizon)[
             #text(weight: "bold", size: 10pt)[#t.days.at(wd - 1)]
             #text(size: 9pt, fill: luma(110))[#h(0.4em) #fmt-date-short(d, t)]
-            #if day-work > 0 [#linebreak()#text(size: 8pt, weight: "bold", fill: work-ink)[#t.work #dur(day-work)]]
+            #linebreak()
+            #line
+            #if info != none and info.drawn != none and info.status != "none" [
+              #linebreak()#text(size: 7pt, fill: luma(110))[#day-eval(info.drawn, t)]
+            ]
           ]))
       }
       // hour lines + labels
@@ -453,32 +509,37 @@
         let key = iso(add-days(monday, wd - 1))
         let x = time-w + i * col-w
 
-        // 1. travel (neutral grey, behind everything else)
+        // 1. travel, behind everything else. Car: solid; transit: dotted outline.
         for leg in by-day-legs.at(key, default: ()) {
           let h = (leg.end_min - leg.start_min) / 60 * hour-h
+          let car = leg.mode == "car"
           place(top + left, dx: x + 2pt, dy: y-of(leg.start_min) + 0.5pt,
             block(
               width: col-w - 4pt, height: h - 1pt,
-              fill: travel-fill, stroke: (left: 1pt + travel-line),
+              fill: if car { car-fill } else { travel-fill },
+              stroke: (left: 1.2pt + travel-line, rest: if car { none } else { (paint: travel-line, thickness: 0.5pt, dash: "dotted") }),
               inset: (x: 3pt, y: 1pt), clip: true,
               align(horizon, text(size: 6.8pt, fill: travel-ink, style: "italic")[
-                #t.travel.at(leg.kind.replace("_", "-")) · #(leg.end_min - leg.start_min) min
+                #leg-text(leg, t) · #(leg.end_min - leg.start_min) min
               ]),
             ))
         }
 
-        // 2. possible work: highlighted in green
+        // 2. work: planned in strong green, fallback in a lighter tone
         for s in by-day-slots.at(key, default: ()) {
+          let planned = s.status == "planned"
           let h = (s.end_min - s.start_min) / 60 * hour-h
           place(top + left, dx: x + 2pt, dy: y-of(s.start_min) + 1pt,
             block(
               width: col-w - 4pt, height: h - 2pt,
-              fill: work-fill, stroke: 1.4pt + work-line, radius: 3pt,
+              fill: if planned { planned-fill } else { fallback-fill },
+              stroke: if planned { 1.4pt + planned-line } else { 1pt + fallback-line },
+              radius: 3pt,
               inset: (x: 4pt, y: 3pt), clip: true,
               {
                 set par(leading: 0.35em, spacing: 0.35em)
-                set text(size: 8pt, fill: work-ink)
-                text(weight: "bold")[#t.work #s.start–#s.end]
+                set text(size: 8pt, fill: if planned { planned-ink } else { fallback-ink })
+                text(weight: "bold")[#if planned { t.planned } else { t.fallback } #s.start–#s.end]
                 linebreak()
                 text(size: 7.5pt, weight: "bold")[#dur(s.minutes)]
               },
@@ -539,10 +600,13 @@
   let t = i18n.at(lang)
   let all-events = plan.events.map(e => e + (d: parse-date(e.date)))
   let show-skipped = plan.config.show_skipped
-  // Skipped sessions are part of the overview; in the grids they are shown or hidden.
   let visible = if show-skipped { all-events } else { all-events.filter(e => not e.skipped) }
   let slots = plan.slots
   let legs = plan.travel
+  let days-info = (:)
+  for d in plan.days {
+    days-info.insert(d.date, d)
+  }
 
   // Colours: stable per course, ordered by title.
   let keys = all-events.sorted(key: e => e.title).map(course-key).dedup()
@@ -560,15 +624,15 @@
   let end-h = calc.max(18, calc.ceil(calc.max(..times.map(x => x.at(1))) / 60))
   let hours = (start-h, end-h)
 
-  let first = all-events.first().d
-  let last = all-events.last().d
+  let first = parse-date(plan.calendar.start)
+  let last = parse-date(plan.calendar.end)
   let subtitle = [#fmt-date-long(first, t) – #fmt-date-long(last, t)]
 
   let month-items = index-by-date(
     events.map(e => (date: e.date, kind: "lecture", start_min: e.start_min, title: e.title,
       start: e.start, color: e.color, skipped: e.skipped))
     + slots.map(s => (date: s.date, kind: "work", start_min: s.start_min, start: s.start,
-      end: s.end, minutes: s.minutes))
+      end: s.end, minutes: s.minutes, status: s.status))
   )
 
   set document(title: title)
@@ -588,7 +652,7 @@
     let y = first.year()
     let m = first.month()
     while y < last.year() or (y == last.year() and m <= last.month()) {
-      pages.push(month-page(y, m, month-items, days, t, title))
+      pages.push(month-page(y, m, month-items, days-info, days, t, title))
       if m == 12 { y += 1; m = 1 } else { m += 1 }
     }
   }
@@ -600,8 +664,9 @@
       let week-events = events.filter(e => week.monday <= e.date and e.date <= iso(sunday))
       let week-slots = slots.filter(s => week.monday <= s.date and s.date <= iso(sunday))
       let week-legs = legs.filter(l => week.monday <= l.date and l.date <= iso(sunday))
-      if week-events.len() > 0 or week-slots.len() > 0 or include-empty-weeks {
-        pages.push(week-page(week, week-events, week-slots, week-legs, days, hours,
+      let has-days = week-events.len() > 0 or week-slots.len() > 0
+      if has-days or include-empty-weeks {
+        pages.push(week-page(week, week-events, week-slots, week-legs, days-info, days, hours,
           color-of, t, title))
       }
     }
