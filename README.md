@@ -59,12 +59,12 @@ minutes; clock times are quoted `"HH:MM"`. Unknown keys are reported as errors, 
 | `[travel] job_to_home` | no | `home_to_job` | Job → home by transit |
 | `[car] home_to_tum`, `home_to_job`, `tum_to_job` | yes, if `[car]` exists | | Car times, minutes |
 | `[car] job_to_tum`, `job_to_home`, `tum_to_home` | no | the other direction | Car times in the other direction |
+| `[car] distance_in_km`, `liters_per_100km`, `fuel_price_per_liter` | no (all three or none) | none | Fuel estimate: every car leg drives `distance_in_km` |
 | `[schedule] earliest_wake_up` | yes | | Earliest time you get up, `"HH:MM"` |
 | `[schedule] latest_at_job` | yes | | Latest time you may still be at the job, `"HH:MM"` (not a duration) |
 | `[schedule] min_time_at_company` | yes | | Shortest work visit worth going to the job for, minutes |
 | `[schedule] weekly_target_hours` | no | none | Hours the planner fills up to each week, e.g. `20` |
 | `[schedule] max_hours_per_week` | no | the target | Never planned above this per week |
-| `[schedule] company_day_penalty_minutes` | no | `60` | Cost of one day at the company, in minutes of extra travel |
 | `[schedule] ready_minutes` | no | `0` | Time between getting up and leaving home |
 | `[schedule] earliest_at_job` | no | none | Office opens; no work before this, `"HH:MM"` |
 | `[schedule] max_shift_minutes` | no | none | Longest single visit, minutes |
@@ -147,13 +147,15 @@ transit and car legs that is allowed (see *The car*), with at most one visit to 
 A visit starts as early as the travel and the opening time allow, and ends as late as the next lecture
 (minus the travel back) and `latest_at_job` allow.
 
-**Cost.** The baseline of a day is the cheapest commute to TUM without work. An option's extra travel is
-its travel above that baseline. Its cost is the extra travel plus `company_day_penalty_minutes` for a
-day with a visit. A day with lectures and no work costs nothing.
+**Cost.** The baseline of a day is the cheapest commute to TUM without work. An option's cost is its
+extra travel: the travel of the whole day above that baseline. A visit adds its trips, so a day with work
+costs more than a day without, and each extra company day adds its trips to the total. A day with lectures
+and no work costs nothing. There is no flat penalty per company day.
 
 **The week.** A small dynamic programme picks one option per day, and a visit length in 15-minute
-steps, so that the planned hours reach `weekly_target_hours` at the lowest total cost without
-exceeding `max_hours_per_week`. The penalty makes it prefer fewer company days. If the target cannot
+steps, so that the planned hours reach `weekly_target_hours` at the lowest total travel without
+exceeding `max_hours_per_week`. Because each company day adds trips, the choice prefers fewer, longer
+visits. If the target cannot
 be reached (for example because of holidays), the week shows the deficit.
 
 **Planned and fallback.** Days chosen by the programme are *planned* (dark green). The next best days,
@@ -161,7 +163,9 @@ ranked by cost per work hour, are *fallback* (light green), enough to cover the 
 fall through. The other days keep their cheapest commute and show their best option in the header.
 
 **Evaluation.** Every day shows its travel, its extra travel over a commute without work, its mode of
-transport and, for days with work, its cost. The overview shows the planned hours per week against the target.
+transport and, for days with work, its cost. With a fuel estimate, each car day also shows the estimated
+fuel in EUR: car legs × `distance_in_km` × `liters_per_100km` / 100 × `fuel_price_per_liter`. The fuel
+estimate is shown, not optimised. The overview shows the planned hours per week against the target.
 
 ## Assumptions
 
@@ -171,6 +175,8 @@ transport and, for days with work, its cost. The overview shows the planned hour
 - Travel times are fixed per route; there is no timetable for public transport and no walking
   inside TUM. A walk between buildings at TUM is not modelled.
 - The car is at home every morning, and every day ends at home.
+- `distance_in_km` is one value for every car leg. A home-to-TUM leg and a TUM-to-job leg usually differ,
+  so the fuel estimate is only approximate.
 - Parking at TUM or at the job is not modelled.
 
 ## Privacy
