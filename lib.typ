@@ -36,7 +36,7 @@
       latest: "Latest at job", earliest-job: "Earliest at job",
       min-block: "Shortest work block", max-block: "Longest work block",
       buffer: "Buffer next to lectures", work-days: "Work days",
-      target: "Weekly target", maximum: "Weekly maximum", penalty: "Penalty per company day",
+      target: "Weekly target", maximum: "Weekly maximum", fuel: "Fuel estimate",
       not-attended: "Courses not attended", sessions: "Sessions not attended",
       show-skipped: "Skipped sessions in PDF", no-work: "Closed / no work",
       overrides: "Day overrides", calendar: "Calendar range",
@@ -75,7 +75,7 @@
       latest: "Spätestens im Job", earliest-job: "Frühestens im Job",
       min-block: "Kürzester Arbeitsblock", max-block: "Längster Arbeitsblock",
       buffer: "Puffer neben Vorlesungen", work-days: "Arbeitstage",
-      target: "Wochenziel", maximum: "Wochenmaximum", penalty: "Strafe pro Firmentag",
+      target: "Wochenziel", maximum: "Wochenmaximum", fuel: "Kraftstoff-Schätzung",
       not-attended: "Nicht besuchte Veranstaltungen", sessions: "Nicht besuchte Termine",
       show-skipped: "Übersprungene im PDF", no-work: "Geschlossen / keine Arbeit",
       overrides: "Tages-Ausnahmen", calendar: "Kalenderzeitraum",
@@ -180,7 +180,7 @@
 #let leg-text(leg, t) = t.legs.at(leg.src + leg.dst, default: "") + " · " + t.modes.at(leg.mode)
 
 // The evaluation line of a day: what it would cost in travel
-#let day-eval(option, t) = [#t.travel #dur(option.travel_minutes) (#t.extra #dur(option.extra_minutes)), #t.modes.at(option.modes, default: option.modes)]
+#let day-eval(option, t) = [#t.travel #dur(option.travel_minutes) (#t.extra #dur(option.extra_minutes)), #t.modes.at(option.modes, default: option.modes)#if option.fuel_eur != none [, ~#calc.round(option.fuel_eur, digits: 2) EUR]]
 
 // ---------------------------------------------------------------- views ---
 
@@ -210,7 +210,9 @@
       .filter(p => (p.at(0) + 1) in cfg.work_days).map(p => p.at(1)).join(", ")),
     (t.cfg.target, if cfg.weekly_target_minutes == none [#t.nothing] else [#dur(cfg.weekly_target_minutes)]),
     (t.cfg.maximum, if cfg.max_week_minutes == none [#t.nothing] else [#dur(cfg.max_week_minutes)]),
-    (t.cfg.penalty, [#cfg.company_day_penalty min]),
+    (t.cfg.fuel, if cfg.car == none or cfg.car.distance_in_km == none [#t.nothing] else [
+      #cfg.car.distance_in_km km × #cfg.car.liters_per_100km l/100 km × #cfg.car.fuel_price_per_liter EUR/l
+    ]),
     (t.cfg.not-attended, if cfg.not_attended.len() == 0 [#t.nothing] else [#cfg.not_attended.join(", ")]),
     (t.cfg.sessions, if cfg.sessions_not_attended.len() == 0 [#t.nothing] else [#cfg.sessions_not_attended.join(", ")]),
     (t.cfg.show-skipped, if cfg.show_skipped [#t.yes] else [#t.hidden]),
@@ -446,6 +448,9 @@
     ]
     #if target != none [
       #text(size: 9pt, fill: luma(110))[ (#t.target #dur(target), #t.delta #signed-dur(week.planned_minutes - target))]
+    ]
+    #if week.fuel_eur != none [
+      #text(size: 9pt, fill: luma(110))[ · #t.cfg.fuel ~#calc.round(week.fuel_eur, digits: 2) EUR]
     ]
   ]
   v(0.2cm)
