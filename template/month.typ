@@ -47,6 +47,20 @@
   )
 }
 
+// Work of one calendar week (Monday to Sunday), in minutes: the planned visits, or the office
+// blocks for the supervisor. Days outside the month still count, since the week is shown in full.
+#let week-work-minutes(monday, days-info, boss) = {
+  let dates = range(7).map(i => iso(add-days(monday, i)))
+  if boss != none {
+    dates.map(d => boss.blocks.at(d, default: ()).map(b => b.minutes).sum(default: 0)).sum(default: 0)
+  } else {
+    dates.map(d => {
+      let info = days-info.at(d, default: none)
+      if info != none and info.status == "planned" { info.work_minutes } else { 0 }
+    }).sum(default: 0)
+  }
+}
+
 // The month grid. `by-date`: items per ISO date (lectures and work), used for the personal PDF.
 // `boss` = (blocks: by date, exams: dates) for the supervisor PDF; lectures and travel are left out.
 #let month-page(year, month, by-date, days-info, days, t, title, boss: none) = {
@@ -68,7 +82,7 @@
   // The grid fills whatever is left of the page.
   block(width: 100%, height: 1fr, layout(size => {
     let head-h = 0.6cm
-    let wk-w = 0.9cm
+    let wk-w = 1.25cm
     let row-h = (size.height - head-h - 0.1cm) / n-weeks
     grid(
       columns: (wk-w, ..(1fr,) * days.len()),
@@ -80,8 +94,11 @@
       ..range(n-weeks).map(w => {
         let monday = add-days(start, 7 * w)
         (
-          grid.cell(fill: luma(245), align: center + top, inset: 4pt,
-            text(size: 7.5pt, fill: luma(120))[#t.wk #weeknum(monday)]),
+          grid.cell(fill: luma(245), align: center + top, inset: 3pt, {
+            let total = week-work-minutes(monday, days-info, boss)
+            [#text(size: 7.5pt, fill: luma(120))[#t.wk #weeknum(monday)]
+            #if total > 0 [#linebreak()#text(size: 7.5pt, weight: "bold", fill: planned-ink)[#dur(total)]]]
+          }),
           ..days.map(wd => month-cell(add-days(monday, wd - 1), month, by-date, days-info, t, boss)),
         )
       }).flatten(),
